@@ -48,7 +48,7 @@ def get_options():
 def construct_url(keyword, location):
     keyword_encoded = urllib.parse.quote(keyword)
     location_encoded = urllib.parse.quote(location)
-    url = f"https://www.linkedin.com/jobs/search?keywords={keyword_encoded}&location={location_encoded}&position=1&pageNum=0"
+    url = f"https://www.linkedin.com/jobs/search?keywords={keyword_encoded}&location={location_encoded}&position=1&pageNum=0&f_TPR=r2592000"
     return url
 
 
@@ -72,6 +72,18 @@ def get_salary(driver, xpath):
         return None
 
 
+def get_date(driver, xpath):
+    try:
+        try:
+            date_elem = driver.find_element(By.XPATH, xpath)
+        except:
+            date_elem = None
+        return date_elem.get_attribute("datetime").strip() if date_elem else ""
+    except (AttributeError, NoSuchElementException) as e:
+        print(e)
+        return None
+
+
 def get_company(driver, xpath):
     try:
         try:
@@ -90,7 +102,7 @@ def get_location(driver, xpath):
             location_elem = driver.find_element(By.XPATH, xpath)
         except:
             location_elem = None
-        return driver.execute_script("return arguments[0].innerText;", location_elem) if location_elem else ""
+        return driver.execute_script("return arguments[0].innerText;", location_elem).strip() if location_elem else ""
     except (AttributeError, NoSuchElementException) as e:
         print(e)
         return None
@@ -238,7 +250,9 @@ def construct_prompt(candidate_profile, jobs_data):
         "employment_type": "string (choices: 'remote', 'hybrid', 'on-site')",
         "linkedin_profiles": "list of strings (set null if they're not available)",
         "original_url": "string (URL)",
-        "salary_range": "string (set null if it's not available)",
+        "salary_range": "string (write the string as it, set null if it's not available)",
+        "min_salary": "string (the minimum salary can be found in the salary_range, get the number only without adding any alpha character. set null if it's not available, and if there was only one number and not a range, extract it here)",
+        "max_salary": "string (the maximum salary can be found in the salary_range, get the number only without adding any alpha character. set null if it's not available, and if there was only one number and not a range, extract it here)",
         "benefits": "list of strings (set null if they're not available)",
         "skills_required": "list of strings (try extracting skills from the description if they're not clearly listed. Only focus on technical skills and soft skills, avoid general hard skills such as 'Software Development', they need to be specific)",
         "posted_date": "string (date in YYYY-MM-DD format, set null if it's not available)",
@@ -349,6 +363,10 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                 if not check_exists_by_xpath(driver, SIGN_IN_BUTTON_XPATH) and not check_exists_by_xpath(driver, USERNAME_INPUT_XPATH):
                     break  # Exit the loop if SIGN_IN_BUTTON_XPATH is not found
 
+                print("==================================================")
+                print(check_exists_by_xpath(driver, SIGN_IN_BUTTON_XPATH))
+                print(check_exists_by_xpath(driver, USERNAME_INPUT_XPATH))
+                print("==================================================")
                 # If SIGN_IN_BUTTON_XPATH is found, visit 2-3 random websites
                 num_sites = random.randint(2, 3)
                 for _ in range(num_sites):
@@ -397,10 +415,14 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                 for anchor in anchors_to_process:
                     if len(total_jobs_collected) >= num_jobs_to_scrape:
                         break
-
+                    parent_elem = anchor.find_element(By.XPATH, "..")
                     driver.execute_script("arguments[0].scrollIntoView();", anchor)
                     time.sleep(random.uniform(0.5, 1.5))  # Give time for new jobs to load
                     job_title_xpath = f"//h2[contains(text(), '{anchor.text.strip()}')]"
+                    print(job_title_xpath)
+                    if "27" in job_title_xpath:
+                        print(job_title_xpath)
+                        time.sleep(10000)
                     move_result = move_until_found(driver, job_title_xpath, 100, TITLE_XPATH, anchor, previous_anchor)
                     if move_result == 'sign_in':
                         print("Sign-in detected during job scraping, visiting random sites.")
@@ -413,10 +435,11 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                     previous_anchor = anchor
                     click_forcefully(driver, anchor, True, TITLE_XPATH)
                     title = anchor.text.strip()
-                    company = get_company(driver, COMPANY_XPATH)
+                    company = get_company(parent_elem, COMPANY_XPATH)
                     location_city = get_location(driver, LOCATION_XPATH)
                     salary = get_salary(driver, SALARY_XPATH)
                     description = get_description(driver, DESCRIPTION_XPATH)
+                    posted_date = get_date(parent_elem, POST_DATE_XPATH)
                     job_link = anchor.get_attribute('href')
 
                     job_data = {
@@ -424,6 +447,7 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                         "company_name": company,
                         "location": location_city,
                         "salary_range": salary,
+                        "posted_date": posted_date,
                         "description": description,
                         "original_url": job_link
                     }
@@ -436,6 +460,7 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                     print(f"Location: {location_city}")
                     print(f"Salary: {salary}")
                     print(f"Description: {description}")
+                    print(f"Date: {posted_date}")
                     print("=====================================================================")
                     time.sleep(random.uniform(1, 3))
 
@@ -457,6 +482,8 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                                     company_name=job_data['company_name'],
                                     location=job_data['location'],
                                     salary_range=job_data.get('salary_range'),
+                                    min_salary=job_data.get('min_salary'),
+                                    max_salary=job_data.get('max_salary'),
                                     employment_type=job_data.get('employment_type', 'full-time'),
                                     original_url=job_data['original_url'].split("?")[0],
                                     skills_required=job_data['skills_required'],

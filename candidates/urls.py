@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CandidateViewSet, CVViewSet, CVDataViewSet, JobViewSet, JobSearchViewSet,
     PaymentViewSet, CreditPurchaseViewSet, SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView,
-    TriggerScrapingView, LogoutView, CurrentUserView, UpdateCandidateView, ChangePasswordView
+    TriggerScrapingView, LogoutView, CurrentUserView, UpdateCandidateView, ChangePasswordView, CandidateJobsView,
+    DeleteJobSearchView, UpdateJobSearchStatusView
 )
 from django.contrib.auth import views as auth_views
 
@@ -12,8 +13,6 @@ router = DefaultRouter()
 router.register(r'candidates', CandidateViewSet)
 router.register(r'cvs', CVViewSet)
 router.register(r'cvdata', CVDataViewSet)
-router.register(r'jobs', JobViewSet)
-router.register(r'jobsearches', JobSearchViewSet)
 router.register(r'payments', PaymentViewSet)
 router.register(r'creditpurchases', CreditPurchaseViewSet)
 
@@ -33,4 +32,8 @@ urlpatterns = [
     path('scrape-jobs/', TriggerScrapingView.as_view(), name='trigger_scraping'),
     path('candidate/update/', UpdateCandidateView.as_view(), name='update-candidate'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
+    path('candidate-jobs/', CandidateJobsView.as_view(), name='candidate-jobs'),
+    path('jobsearches/<int:job_id>/delete/', DeleteJobSearchView.as_view(), name='delete-jobsearch'),
+    path('jobsearches/<int:job_id>/update-status/', UpdateJobSearchStatusView.as_view(),
+         name='update-jobsearch-status'),
 ]

@@ -32,13 +32,13 @@ class CVDataSerializer(serializers.ModelSerializer):
 class JobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
-        fields = '__all__'
+        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type"]
 
 
 class JobSearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobSearch
-        fields = '__all__'
+        fields = ["similarity_score", "search_date", "status"]
 
 
 class PaymentSerializer(serializers.ModelSerializer):
