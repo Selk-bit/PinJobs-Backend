@@ -21,6 +21,10 @@ from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import update_session_auth_hash
+import django_filters
+from django.db.models import Q
+from rest_framework.pagination import PageNumberPagination
+from datetime import datetime
 
 
 class CandidateViewSet(viewsets.ModelViewSet):
@@ -94,6 +98,173 @@ class JobSearchViewSet(viewsets.ModelViewSet):
         # Ensure only the authenticated user can access their job searches
         user = self.request.user
         return JobSearch.objects.filter(candidate__user=user)
+
+
+class JobFilter(django_filters.FilterSet):
+    description = django_filters.CharFilter(field_name="description", lookup_expr='icontains')
+    company_name = django_filters.CharFilter(field_name="company_name", lookup_expr='icontains')
+    requirements = django_filters.CharFilter(field_name="requirements", lookup_expr='icontains')
+    location = django_filters.CharFilter(field_name="location", lookup_expr='icontains')
+    industry = django_filters.CharFilter(field_name="industry", lookup_expr='icontains')
+    employment_type = django_filters.ChoiceFilter(choices=Job.EMPLOYMENT_TYPE_CHOICES)
+    job_type = django_filters.ChoiceFilter(choices=Job.JOB_TYPE_CHOICES)
+
+    # New filters for min and max salary
+    min_salary = django_filters.NumberFilter(field_name="min_salary", lookup_expr='gte')
+    max_salary = django_filters.NumberFilter(field_name="max_salary", lookup_expr='lte')
+
+    # Date filters that parse the specific date format
+    posted_date_range_after = django_filters.CharFilter(method='filter_posted_date_after')
+    posted_date_range_before = django_filters.CharFilter(method='filter_posted_date_before')
+
+    skills = django_filters.CharFilter(method='filter_by_skills')
+    search = django_filters.CharFilter(method='filter_search')
+
+    class Meta:
+        model = Job
+        fields = ['description', 'company_name', 'requirements', 'location', 'industry', 'employment_type',
+                  'job_type', 'min_salary', 'max_salary', 'skills', 'search', 'posted_date_range_after', 'posted_date_range_before']
+
+
+    def parse_date(self, date_str):
+        try:
+            # Remove the timezone in parentheses, e.g., "(GMT+01:00)"
+            date_str = date_str.split(" (")[0]
+            # Parse the date without the timezone description
+            return datetime.strptime(date_str, '%a %b %d %Y %H:%M:%S GMT%z')
+        except ValueError:
+            return None
+
+    def filter_posted_date_after(self, queryset, name, value):
+        date_after = self.parse_date(value)
+        if date_after:
+            return queryset.filter(posted_date__gte=date_after.date())
+        return queryset  # Ignore if parsing fails
+
+    def filter_posted_date_before(self, queryset, name, value):
+        date_before = self.parse_date(value)
+        if date_before:
+            return queryset.filter(posted_date__lte=date_before.date())
+        return queryset  # Ignore if parsing fails
+
+    def filter_by_skills(self, queryset, name, value):
+        skills = [skill.strip().lower() for skill in value.split(',')]
+        for skill in skills:
+            queryset = queryset.filter(Q(skills_required__icontains=skill))
+        return queryset
+
+    def filter_search(self, queryset, name, value):
+        value = value.strip().lower()
+        return queryset.filter(
+            Q(title__icontains=value) |
+            Q(description__icontains=value) |
+            Q(company_name__icontains=value) |
+            Q(requirements__icontains=value) |
+            Q(benefits__icontains=value)
+        )
+
+class CandidateJobsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    class CustomPagination(PageNumberPagination):
+        page_size = 5
+        page_size_query_param = 'page_size'
+        max_page_size = 100
+
+    def get(self, request):
+        # Get the authenticated candidate
+        candidate = request.user.candidate
+
+        # Get the filter params from request
+        filters = request.query_params
+        # Apply filters for the Job model using the JobFilter
+        job_filter = JobFilter(filters, queryset=Job.objects.all())
+        jobs = job_filter.qs
+
+        # Apply additional filtering on JobSearch for the current candidate
+        job_searches = JobSearch.objects.filter(candidate=candidate)
+
+        # Merge job data with the related job search
+        results = []
+        for job in jobs:
+            try:
+                # Find the JobSearch for the specific job and candidate
+                job_search = job_searches.get(job=job)
+
+                # Serialize the job and job search data
+                job_data = JobSerializer(job).data
+                job_data['job_search'] = JobSearchSerializer(job_search).data
+
+                results.append(job_data)
+            except JobSearch.DoesNotExist:
+                continue  # Skip jobs that don't have a JobSearch for the candidate
+
+        # Sorting logic: sort by similarity score or posted date
+        sort_by = request.query_params.get('sort_by', 'similarity_score')
+        print(sort_by)
+        if sort_by == 'posted_date':
+            # Sort by posted_date if it exists, otherwise by similarity_score
+            results.sort(
+                key=lambda x: (
+                    x['posted_date'] is None,  # False if posted_date is not None
+                    x['posted_date'] or x['job_search']['similarity_score'],
+                ),
+                reverse=True
+            )
+        else:  # Default sorting by similarity score
+            results = sorted(results, key=lambda x: x['job_search']['similarity_score'], reverse=True)
+
+        # Apply pagination
+        paginator = self.CustomPagination()
+        paginated_results = paginator.paginate_queryset(results, request)
+
+        return paginator.get_paginated_response(paginated_results)
+
+
+
+class DeleteJobSearchView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, job_id):
+        candidate = request.user.candidate
+
+        try:
+            # Fetch the JobSearch that belongs to the candidate and includes the job
+            job_search = get_object_or_404(JobSearch, candidate=candidate, job__id=job_id)
+
+            # Delete the JobSearch
+            job_search.delete()
+
+            return Response({"detail": "JobSearch deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        except JobSearch.DoesNotExist:
+            return Response({"detail": "JobSearch not found for this candidate."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UpdateJobSearchStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, job_id):
+        candidate = request.user.candidate
+
+        try:
+            # Fetch the job search that belongs to the candidate and includes the job
+            job_search = get_object_or_404(JobSearch, candidate=candidate, job__id=job_id)
+
+            # Update the job search status from 'matched' to 'applied'
+            if job_search.status == 'matched':
+                job_search.status = 'applied'
+                job_search.save()
+
+                return Response({"detail": "Job search status updated to 'applied'."}, status=status.HTTP_200_OK)
+            else:
+                return Response({"detail": "Job search is already 'applied'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        except JobSearch.DoesNotExist:
+            return Response({"detail": "Job search not found for this candidate."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PaymentViewSet(viewsets.ModelViewSet):

@@ -2,7 +2,6 @@ from django.db import models
 from django.contrib.auth.models import User
 
 
-
 class Candidate(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)
     first_name = models.CharField(max_length=50)
@@ -74,37 +73,45 @@ class Job(models.Model):
     description = models.TextField()
     requirements = models.JSONField(blank=True, null=True)
     company_name = models.CharField(max_length=255, blank=True, null=True)
-    company_size = models.IntegerField(blank=True, null=True)  # Changed to integer for number of employees
+    company_size = models.IntegerField(blank=True, null=True)
     location = models.CharField(max_length=255, blank=True, null=True)
-    linkedin_profiles = models.JSONField(blank=True, null=True)  # Store LinkedIn URLs as a JSON array
+    linkedin_profiles = models.JSONField(blank=True, null=True)
+
+    EMPLOYMENT_TYPE_CHOICES = [
+        ('remote', 'Remote'),
+        ('hybrid', 'Hybrid'),
+        ('on-site', 'On-site'),
+    ]
     employment_type = models.CharField(
         max_length=50,
-        choices=[
-            ('remote', 'Remote'),
-            ('hybrid', 'Hybrid'),
-            ('on-site', 'On-site')
-        ],
+        choices=EMPLOYMENT_TYPE_CHOICES,
         blank=True,
         null=True
     )
     original_url = models.URLField()
+
     salary_range = models.CharField(max_length=100, blank=True, null=True)
-    benefits = models.JSONField(blank=True, null=True)  # Store benefits as a JSON array
-    skills_required = models.JSONField(blank=True, null=True)  # Store required skills as a JSON array
+    min_salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    max_salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+
+    benefits = models.JSONField(blank=True, null=True)
+    skills_required = models.JSONField(blank=True, null=True)
     posted_date = models.DateField(blank=True, null=True)
     expiration_date = models.DateField(blank=True, null=True)
     industry = models.CharField(max_length=100, blank=True, null=True)
+
+    JOB_TYPE_CHOICES = [
+        ('full-time', 'Full-time'),
+        ('part-time', 'Part-time'),
+        ('contract', 'Contract'),
+        ('freelance', 'Freelance'),
+        ('CDD', 'CDD (Fixed-term)'),
+        ('CDI', 'CDI (Indefinite-term)'),
+        ('other', 'Other'),
+    ]
     job_type = models.CharField(
         max_length=50,
-        choices=[
-            ('full-time', 'Full-time'),
-            ('part-time', 'Part-time'),
-            ('contract', 'Contract'),
-            ('freelance', 'Freelance'),
-            ('CDD', 'CDD (Fixed-term)'),
-            ('CDI', 'CDI (Indefinite-term)'),
-            ('other', 'Other')
-        ],
+        choices=JOB_TYPE_CHOICES,
         default='full-time'
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -112,7 +119,6 @@ class Job(models.Model):
 
     def __str__(self):
         return f"{self.title} at {self.company_name}"
-
 
 class JobSearch(models.Model):
     candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE)
