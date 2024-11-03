@@ -24,9 +24,23 @@ class CVSerializer(serializers.ModelSerializer):
 
 
 class CVDataSerializer(serializers.ModelSerializer):
+    cv_id = serializers.IntegerField(source='cv.id', read_only=True)
+
     class Meta:
         model = CVData
-        fields = '__all__'
+        fields = [
+            "cv_id", "title", "name", "email", "phone", "age", "city",
+            "work", "educations", "languages", "skills", "interests",
+            "social", "certifications", "projects", "volunteering",
+            "references", "headline", "summary",
+        ]
+
+    def to_internal_value(self, data):
+        # Convert empty strings to None for nullable fields
+        for field in self.fields:
+            if data.get(field) == "":
+                data[field] = None
+        return super().to_internal_value(data)
 
 
 class JobSerializer(serializers.ModelSerializer):

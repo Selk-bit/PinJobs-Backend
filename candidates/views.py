@@ -436,6 +436,78 @@ class ChangePasswordView(APIView):
         return Response({"detail": "Password updated successfully"}, status=status.HTTP_200_OK)
 
 
+class CVDataView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Get the authenticated candidate
+        candidate = request.user.candidate
+
+        # Retrieve the CVData for the candidate
+        try:
+            cv_data = CVData.objects.get(cv__candidate=candidate)
+            serializer = CVDataSerializer(cv_data)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except CVData.DoesNotExist:
+            return Response({"error": "CVData not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
+
+
+class DeleteCVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, cv_id):
+        # Get the authenticated candidate
+        candidate = request.user.candidate
+
+        try:
+            # Retrieve the CV associated with the candidate and the given cv_id
+            cv = CV.objects.get(id=cv_id, candidate=candidate)
+
+            # Delete the CV and its related CVData
+            CVData.objects.filter(cv=cv).delete()
+            cv.delete()
+
+            return Response({"detail": "CV and associated CVData deleted successfully"},
+                            status=status.HTTP_204_NO_CONTENT)
+
+        except CV.DoesNotExist:
+            return Response({"error": "CV not found or does not belong to the authenticated user"},
+                            status=status.HTTP_404_NOT_FOUND)
+
+
+class UpdateOrCreateCVDataView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Retrieve or create the CV based on `cv_id`
+        cv_id = request.data.get("cv_id")
+        candidate = request.user.candidate
+
+        if cv_id:
+            # Attempt to retrieve the existing CV, if present
+            try:
+                cv = CV.objects.get(id=cv_id, candidate=candidate)
+                # Update existing CVData
+                cv_data, created = CVData.objects.get_or_create(cv=cv)
+            except CV.DoesNotExist:
+                # Return an error response if the CV does not exist
+                return Response(
+                    {"error": "CV not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            # Create a new CV instance and associated CVData for the authenticated user
+            cv = CV.objects.create(candidate=candidate)
+            cv_data = CVData.objects.create(cv=cv)
+
+        # Serialize and update the CVData fields
+        serializer = CVDataSerializer(cv_data, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK if cv_id else status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class UploadCVView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -479,42 +551,44 @@ class UploadCVView(APIView):
 
             # Create new CVData from the extracted data
             response_data = []
-            for data in extracted_data:
+            if extracted_data:
                 cv_data = CVData.objects.create(
                     cv=cv,
-                    title=data.get('title'),
-                    name=data.get('name'),
-                    email=data.get('email'),
-                    phone=data.get('phone'),
-                    age=data.get('age'),
-                    city=data.get('city'),
-                    work=data.get('work', []),
-                    educations=data.get('educations', []),
-                    languages=data.get('languages', []),
-                    skills=data.get('skills', []),
-                    social=data.get('social', []),
-                    certifications=data.get('certifications', []),
-                    projects=data.get('projects', []),
-                    volunteering=data.get('volunteering', []),
-                    references=data.get('references', []),
-                    headline=data.get('headline'),
-                    summary=data.get('summary')
+                    title=extracted_data[0].get('title'),
+                    name=extracted_data[0].get('name'),
+                    email=extracted_data[0].get('email'),
+                    phone=extracted_data[0].get('phone'),
+                    age=extracted_data[0].get('age'),
+                    city=extracted_data[0].get('city'),
+                    work=extracted_data[0].get('work', []),
+                    educations=extracted_data[0].get('educations', []),
+                    languages=extracted_data[0].get('languages', []),
+                    skills=extracted_data[0].get('skills', []),
+                    social=extracted_data[0].get('social', []),
+                    certifications=extracted_data[0].get('certifications', []),
+                    projects=extracted_data[0].get('projects', []),
+                    volunteering=extracted_data[0].get('volunteering', []),
+                    references=extracted_data[0].get('references', []),
+                    headline=extracted_data[0].get('headline'),
+                    summary=extracted_data[0].get('summary')
                 )
 
                 # Serialize data and remove "id" and "cv" fields
                 serialized_data = CVDataSerializer(cv_data).data
                 serialized_data.pop('id', None)
                 serialized_data.pop('cv', None)
-                response_data.append(serialized_data)
+                # response_data.append(serialized_data)
 
-            # Deduct one credit from the candidate
-            candidate.credits -= 1
-            candidate.save()
+                candidate.credits -= 1
+                candidate.save()
 
-            # Respond with the created CVData excluding "id" and "cv" fields
-            return Response(response_data, status=status.HTTP_201_CREATED)
-        else:
-            return Response({'error': 'Failed to extract data from the external API.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # Respond with the created CVData excluding "id" and "cv" fields
+                return Response(serialized_data, status=status.HTTP_201_CREATED)
+            else:
+                return Response({'error': 'Failed to extract data from the external API.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({'error': 'Failed to extract data from the external API.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class LinkedInCVView(APIView):
@@ -648,7 +722,7 @@ class LinkedInCVView(APIView):
             serialized_data.pop('id', None)
             serialized_data.pop('cv', None)
 
-            return Response([serialized_data], status=status.HTTP_201_CREATED)
+            return Response(serialized_data, status=status.HTTP_201_CREATED)
         else:
             return Response({'error': 'Failed to fetch LinkedIn profile data.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -666,136 +740,205 @@ class JobDescriptionCVView(APIView):
         # Check if the candidate has enough credits
         candidate = request.user.candidate
         if candidate.credits <= 0:
-            return Response({'error': 'No credits available. Please purchase more credits.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'No credits available. Please purchase more credits.'},
+                            status=status.HTTP_403_FORBIDDEN)
 
-        # Construct the prompt to send to Gemini AI
-        prompt = f"""
-You are tasked with generating a JSON representation of a resume based on a job description. The resume should intelligently match the job requirements, but you should not copy the job description verbatim. Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately. You must leave the work experiences and education fields empty, as these should be filled only by the candidate. However, you should intelligently fill the following fields to fit the job description:
+        # Check if the candidate already has CVData
+        cv_data_instance = CVData.objects.filter(cv__candidate=candidate).first()
 
-**Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
-**Social**: Include a list of relevant soft skills based on the job description.
-**Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
-**Languages**: Include any languages that could be relevant for the job.
-**Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
-**Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications. The projects must be general popular projects people with similar profiles usually works on.
-**Interests**: Randomly generate a few interests.
+        if cv_data_instance:
+            # Use the name from the existing CVData if available
+            name = cv_data_instance.name if cv_data_instance.name else f"{candidate.first_name} {candidate.last_name}"
 
-Do not copy job requirements directly. Your goal is to adapt the resume to reflect a candidate who is a strong match for the job, but without making up past job experiences or education.
+            # Determine which fields are missing
+            missing_fields = {
+                "age": cv_data_instance.age,
+                "work": cv_data_instance.work,
+                "educations": cv_data_instance.educations,
+            }
 
-If a city or country is found in the job description, use it as the candidate's location.
+            # Construct the prompt to ask for missing fields only
+            prompt = f"""
+                You are tasked with generating a JSON representation of a resume based on a job description.
+                The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
+                Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
 
-Return the data as a JSON with the following structure:
-{{
-    "title": "<job_title>",  # The job title, rephrased slightly
-    "name": "{candidate.first_name} {candidate.last_name}",
-    "email": "{candidate.user.email}",
-    "phone": "{candidate.phone}",
-    "age": null,  # Leave this empty
-    "city": "<city>",  # Extracted from the job description, if found
-    "work": [],  # Leave this empty
-    "educations": [],  # Leave this empty
-    "languages": [
-        {{
-            "language": "<language_name>",
-            "level": "<proficiency>"
-        }}
-    ],
-    "skills": [
-        {{
-            "skill": "<hard_skill_name>",
-            "level": "<hard_skill_level>"  # advanced for emphasized hard skills, intermediate for others
-        }}
-    ],
-    "social": [
-        {{
-            "skill": "<soft_skill_name>"
-        }}
-    ],
-    "certifications": [
-        {{
-            "certification": "<certification_title>",
-            "institution": "<website_name>",
-            "link": "<certification_link>", #null if you can't find it
-            "date": null
-        }}
-    ],
-    "projects": [
-        {{
-            "project_name": "<project_name>",
-            "description": "<project_description>",
-            "start_date": "",
-            "end_date": ""
-        }},
-        {{
-            "project_name": "<project_name>",
-            "description": "<project_description>",
-            "start_date": "",
-            "end_date": ""
-        }}
-    ],
-    "interests": [
-        {{
-            "interest": "<interest_1>"
-        }},
-        {{
-            "interest": "<interest_2>"
-        }},
-        {{
-            "interest": "<interest_3>"
-        }}
-    ],
-    "headline": null,  # Leave this empty
-    "summary": "<tailored_summary>"
-}}  
+                Leave fields like work experiences, education, and other existing fields empty, except for the missing fields indicated below:
 
-Do not add any additional comments or text outside of this JSON. The response should only contain the JSON object.
+                **Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
+                **Social**: Include a list of relevant soft skills based on the job description.
+                **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
+                **Languages**: Include any languages that could be relevant for the job.
+                **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
+                **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
+                **Interests**: Randomly generate a few interests.
+                **Age**: Leave age value as I passed it without any change.
+                **Work**: Leave work array as I passed it without any change.
+                **Educations**: Leave educations array as I passed it without any change.
 
-Here is the job description:
-{job_description}
-"""
+                If a city or country is found in the job description, use it as the candidate's location.
 
+                Return the data as a JSON with the following structure:
+                {{
+                    "title": "<job_title>",
+                    "name": "{name}",
+                    "email": "{candidate.user.email}",
+                    "phone": "{candidate.phone}",
+                    "age": {missing_fields['age']},
+                    "city": "<city>",
+                    "work": {missing_fields['work']},
+                    "educations": {missing_fields['educations']},
+                    "languages": [
+                        {{
+                            "language": "<language_name>",
+                            "level": "<proficiency>"
+                        }}
+                    ],
+                    "skills": [
+                        {{
+                            "skill": "<hard_skill_name>",
+                            "level": "<hard_skill_level>"
+                        }}
+                    ],
+                    "social": [
+                        {{
+                            "skill": "<soft_skill_name>"
+                        }}
+                    ],
+                    "certifications": [
+                        {{
+                            "certification": "<certification_title>",
+                            "institution": "<website_name>",
+                            "link": "<certification_link>",
+                            "date": null
+                        }}
+                    ],
+                    "projects": [
+                        {{
+                            "project_name": "<project_name>",
+                            "description": "<project_description>",
+                            "start_date": "",
+                            "end_date": ""
+                        }}
+                    ],
+                    "interests": [
+                        {{
+                            "interest": "<interest_1>"
+                        }}
+                    ],
+                    "headline": null,
+                    "summary": "<tailored_summary>"
+                }}
+
+                Here is the job description:
+                {job_description}
+            """
+        else:
+            # Construct the full prompt if no CVData exists
+            prompt = f"""
+                You are tasked with generating a JSON representation of a resume based on a job description.
+                The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
+                Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
+
+                You must leave the work experiences and education fields empty, as these should be filled only by the candidate.
+                However, you should intelligently fill the following fields to fit the job description:
+
+                **Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
+                **Social**: Include a list of relevant soft skills based on the job description.
+                **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
+                **Languages**: Include any languages that could be relevant for the job.
+                **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
+                **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
+                **Interests**: Randomly generate a few interests.
+
+                If a city or country is found in the job description, use it as the candidate's location.
+
+                Return the data as a JSON with the following structure:
+                {{
+                    "title": "<job_title>",
+                    "name": "{candidate.first_name} {candidate.last_name}",
+                    "email": "{candidate.user.email}",
+                    "phone": "{candidate.phone}",
+                    "age": null,
+                    "city": "<city>",
+                    "work": [],
+                    "educations": [],
+                    "languages": [
+                        {{
+                            "language": "<language_name>",
+                            "level": "<proficiency>"
+                        }}
+                    ],
+                    "skills": [
+                        {{
+                            "skill": "<hard_skill_name>",
+                            "level": "<hard_skill_level>"
+                        }}
+                    ],
+                    "social": [
+                        {{
+                            "skill": "<soft_skill_name>"
+                        }}
+                    ],
+                    "certifications": [
+                        {{
+                            "certification": "<certification_title>",
+                            "institution": "<website_name>",
+                            "link": "<certification_link>",
+                            "date": null
+                        }}
+                    ],
+                    "projects": [
+                        {{
+                            "project_name": "<project_name>",
+                            "description": "<project_description>",
+                            "start_date": "",
+                            "end_date": ""
+                        }}
+                    ],
+                    "interests": [
+                        {{
+                            "interest": "<interest_1>"
+                        }}
+                    ],
+                    "headline": null,
+                    "summary": "<tailored_summary>"
+                }}
+
+                Here is the job description:
+                {job_description}
+            """
 
         # Get the response from Gemini
         try:
             gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
             print(gemini_response)
             gemini_data = json.loads(gemini_response)
         except Exception as e:
             print(e)
-            return Response({'error': e}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Create a new CV and CVData based on the Gemini AI response
-        cv = CV.objects.create(candidate=candidate, original_file=None)
+        if cv_data_instance:
+            # Update existing CVData with the new data
+            serializer = CVDataSerializer(cv_data_instance, data=gemini_data, partial=True)
+        else:
+            # Create a new CV and CVData
+            cv = CV.objects.create(candidate=candidate, original_file=None)
+            gemini_data['cv'] = cv.id
+            serializer = CVDataSerializer(data=gemini_data)
 
-        cv_data = CVData.objects.create(
-            cv=cv,
-            title=gemini_data.get('title', ''),
-            name=gemini_data.get('name', ''),
-            email=gemini_data.get('email', ''),
-            phone=gemini_data.get('phone', ''),
-            age=gemini_data.get('age', ''),
-            city=gemini_data.get('city', ''),
-            work=[],  # Empty as per the instructions
-            educations=[],  # Empty as per the instructions
-            languages=gemini_data.get('languages', []),
-            skills=gemini_data.get('skills', []),
-            social=gemini_data.get('social', []),
-            certifications=gemini_data.get('certifications', []),
-            projects=gemini_data.get('projects', []),
-            headline=gemini_data.get('title', ''),
-            summary=gemini_data.get('summary', '')
-        )
-
-        # Deduct one credit from the candidate
-        candidate.credits -= 1
-        candidate.save()
-
-        # Serialize and return the CVData response
-        serialized_data = CVDataSerializer(cv_data).data
-        serialized_data.pop('id', None)
-        serialized_data.pop('cv', None)
-
-        return Response([serialized_data], status=status.HTTP_201_CREATED)
+        if serializer.is_valid():
+            serializer.save()
+            candidate.credits -= 1
+            candidate.save()
+            serialized_data = serializer.data
+            serialized_data.pop('id', None)
+            serialized_data.pop('cv', None)
+            return Response(serialized_data,
+                            status=status.HTTP_201_CREATED if not cv_data_instance else status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class TriggerScrapingView(APIView):

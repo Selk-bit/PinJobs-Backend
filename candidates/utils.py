@@ -8,6 +8,8 @@ import time
 from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium import webdriver
 import undetected_chromedriver as uc
 import chromedriver_autoinstaller
 import urllib.parse
@@ -17,6 +19,7 @@ import psutil
 import shutil
 from .constants import *
 from .models import Job, JobSearch
+from django.core.files.storage import default_storage
 
 
 def get_gemini_response(prompt):
@@ -36,12 +39,21 @@ def get_temp_dir():
 
 
 def get_options():
+    folder = 'chromedriver/'
     chrome_options = Options()
     width = random.randint(1000, 2000)
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_experimental_option("useAutomationExtension", False)
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_argument("disable-infobars")
+    chrome_options.add_argument('log-level=3')
+    # chrome_options.binary_location = f"{default_storage.open(f"{folder}chromedriver.exe")}"
     return chrome_options
 
 
@@ -233,8 +245,8 @@ def kill_chrome(driver):
         driver.quit()
     except Exception as e:
         print(f"Error closing driver: {e}")
-    kill_chrome_processes()
-    clear_recent_temp_files(get_temp_dir(), age_minutes=200)
+    # kill_chrome_processes()
+    # clear_recent_temp_files(get_temp_dir(), age_minutes=200)
 
 
 def construct_prompt(candidate_profile, jobs_data):
@@ -329,7 +341,7 @@ def construct_prompt(candidate_profile, jobs_data):
 def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
     # Read candidate profile from candidate.json
     candidate_profile = candidate_data
-
+    candidate = candidate_profile['candidate']
     partial_jobs_collected = []
     total_jobs_collected = []
     anchors_processed = set()
@@ -340,16 +352,19 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             location = candidate_profile['city']
             url = construct_url(keyword, location)
             chrome_options = get_options()
-            version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
-            driver = uc.Chrome(options=chrome_options, version_main=version_main)
-
+            # version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
+            # driver = uc.Chrome(options=chrome_options, version_main=version_main)
+            folder = 'chromedriver/'
+            service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.maximize_window()
             # Visit a random popular website instead of Google
             initial_site = random.choice(POPULAR_WEBSITES)
             driver.get(initial_site)
             time.sleep(random.uniform(1, 3))
 
             while True:
-                existing_job_searches = JobSearch.objects.filter(candidate=candidate_profile['candidate'])
+                existing_job_searches = JobSearch.objects.filter(candidate=candidate)
                 already_scraped_urls = [job_search.job.original_url for job_search in existing_job_searches]
                 try:
                     driver.get(url)
@@ -360,13 +375,8 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                     raise Exception("Connection error encountered, restarting...")
 
                 # Check if we are redirected to the home page
-                if not check_exists_by_xpath(driver, SIGN_IN_BUTTON_XPATH) and not check_exists_by_xpath(driver, USERNAME_INPUT_XPATH):
+                if check_exists_by_xpath(driver, JOB_RESULTS_XPATH):
                     break  # Exit the loop if SIGN_IN_BUTTON_XPATH is not found
-
-                print("==================================================")
-                print(check_exists_by_xpath(driver, SIGN_IN_BUTTON_XPATH))
-                print(check_exists_by_xpath(driver, USERNAME_INPUT_XPATH))
-                print("==================================================")
                 # If SIGN_IN_BUTTON_XPATH is found, visit 2-3 random websites
                 num_sites = random.randint(2, 3)
                 for _ in range(num_sites):
@@ -419,10 +429,6 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                     driver.execute_script("arguments[0].scrollIntoView();", anchor)
                     time.sleep(random.uniform(0.5, 1.5))  # Give time for new jobs to load
                     job_title_xpath = f"//h2[contains(text(), '{anchor.text.strip()}')]"
-                    print(job_title_xpath)
-                    if "27" in job_title_xpath:
-                        print(job_title_xpath)
-                        time.sleep(10000)
                     move_result = move_until_found(driver, job_title_xpath, 100, TITLE_XPATH, anchor, previous_anchor)
                     if move_result == 'sign_in':
                         print("Sign-in detected during job scraping, visiting random sites.")
@@ -498,6 +504,8 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                                     job=job,
                                     similarity_score=job_data['score']
                                 )
+                                candidate.credits -= 1
+                                candidate.save()
                         except json.JSONDecodeError as e:
                             print(f"Error parsing Gemini response: {e}")
                             print("Gemini response was:")

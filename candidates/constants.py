@@ -10,6 +10,7 @@ LOCATION_XPATH = "//span[contains(@class, 'topcard__flavor topcard__flavor--bull
 SIGN_IN_BUTTON_XPATH = "//a[contains(@class, 'sign-in-form__sign-in-cta')]"
 SUBMIT_BUTTON_XPATH = "//input[contains(@class, 'join-form__form-body-submit-button')]"
 USERNAME_INPUT_XPATH = "//input[@id='email-or-phone']"
+JOB_RESULTS_XPATH = "//meta[@content='d_jobs_guest_search']"
 POPULAR_WEBSITES = [
     "https://www.google.com",
     "https://www.wikipedia.org",
