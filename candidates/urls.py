@@ -4,13 +4,12 @@ from .views import (
     CandidateViewSet, CVViewSet, CVDataViewSet, JobViewSet, JobSearchViewSet,
     PaymentViewSet, CreditPurchaseViewSet, SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView,
     TriggerScrapingView, LogoutView, CurrentUserView, UpdateCandidateView, ChangePasswordView, CandidateJobsView,
-    DeleteJobSearchView, UpdateJobSearchStatusView
+    DeleteJobSearchView, UpdateJobSearchStatusView, CVDataView, DeleteCVView, UpdateOrCreateCVDataView
 )
 from django.contrib.auth import views as auth_views
 
 
 router = DefaultRouter()
-router.register(r'candidates', CandidateViewSet)
 router.register(r'cvs', CVViewSet)
 router.register(r'cvdata', CVDataViewSet)
 router.register(r'payments', PaymentViewSet)
@@ -36,4 +35,7 @@ urlpatterns = [
     path('jobsearches/<int:job_id>/delete/', DeleteJobSearchView.as_view(), name='delete-jobsearch'),
     path('jobsearches/<int:job_id>/update-status/', UpdateJobSearchStatusView.as_view(),
          name='update-jobsearch-status'),
+    path('cv-data/', CVDataView.as_view(), name='cv-data'),
+    path('cv/<int:cv_id>/delete/', DeleteCVView.as_view(), name='delete-cv'),
+    path('cv/update-cvdata/', UpdateOrCreateCVDataView.as_view(), name='update-cvdata'),
 ]
