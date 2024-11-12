@@ -32,7 +32,7 @@ SECRET_KEY = 'django-insecure-2xcxt#4wfn87%_9(1$^3w@(7+ynt*9_9(f(%2tvdcoai97$q&u
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["pinjobs-backend.onrender.com"]
 
 
 # Application definition
