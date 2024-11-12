@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Update package lists and install Chrome
-apt-get update && apt-get install -y wget unzip
-wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
-apt-get update
-apt-get install -y google-chrome-stable
 
-# Create chromedriver directory
-mkdir -p chromedriver
+# Define directories
+mkdir -p $HOME/bin
 
-# Install ChromeDriver
-CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
-CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
-wget -N "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" -P /tmp/
-unzip /tmp/chromedriver_linux64.zip -d chromedriver/
-rm /tmp/chromedriver_linux64.zip
-chmod +x chromedriver/chromedriver
+# Download and install Chrome
+CHROME_URL="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+wget -O $HOME/bin/google-chrome.deb "$CHROME_URL"
+dpkg -x $HOME/bin/google-chrome.deb $HOME/bin
+
+# Set Chrome binary location
+export CHROME_BIN=$HOME/bin/opt/google/chrome/google-chrome
+
+# Download ChromeDriver
+CHROME_VERSION=$(google-chrome --version | awk '{print $3}')
+CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION" || echo "latest")
+wget -N "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" -P $HOME/bin
+unzip $HOME/bin/chromedriver_linux64.zip -d $HOME/bin
+chmod +x $HOME/bin/chromedriver
+
+# Update PATH
+export PATH=$PATH:$HOME/bin
