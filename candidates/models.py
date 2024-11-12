@@ -27,12 +27,56 @@ class Candidate(models.Model):
         return f"{self.first_name} {self.last_name}"
 
 
+class CreditOrder(models.Model):
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE)
+    credits = models.PositiveIntegerField()
+    order_id = models.CharField(max_length=100, unique=True)
+    paid = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Order {self.order_id} for {self.credits} credits"
+
+
+class Modele(models.Model):
+    identity = models.CharField(max_length=255, default='reference')
+    template = models.CharField(max_length=255, default='sydney')
+    company_logo = models.JSONField(default=dict)
+    page = models.JSONField(default=dict)
+    certifications = models.JSONField(default=dict)
+    education = models.JSONField(default=dict)
+    experience = models.JSONField(default=dict)
+    volunteering = models.JSONField(default=dict)
+    interests = models.JSONField(default=dict)
+    languages = models.JSONField(default=dict)
+    projects = models.JSONField(default=dict)
+    references = models.JSONField(default=dict)
+    skills = models.JSONField(default=dict)
+    social = models.JSONField(default=dict)
+    theme = models.JSONField(default=dict)         # color settings
+    personnel = models.JSONField(default=dict)     # display settings for personal information
+    typography = models.JSONField(default=dict)    # font and typography settings
+
+    def __str__(self):
+        return f"Modele for Template {self.template}"
+
+class Template(models.Model):
+    name = models.CharField(max_length=255)
+    language = models.CharField(max_length=10, choices=[('en', 'English'), ('fr', 'French')], default='en')
+    reference = models.CharField(max_length=255, blank=True, null=True)
+    templateData = models.OneToOneField(Modele, on_delete=models.CASCADE, related_name='+')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Template {self.name} in {self.language}"
 
 
 class CV(models.Model):
     candidate = models.OneToOneField(Candidate, on_delete=models.CASCADE)
     original_file = models.FileField(upload_to='cvs/original/', blank=True, null=True)
-    generated_html = models.TextField(blank=True, null=True)
+    template = models.OneToOneField(Template, on_delete=models.SET_NULL, null=True, blank=True)
     generated_pdf = models.FileField(upload_to='cvs/pdf/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -119,6 +163,7 @@ class Job(models.Model):
 
     def __str__(self):
         return f"{self.title} at {self.company_name}"
+
 
 class JobSearch(models.Model):
     candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE)
