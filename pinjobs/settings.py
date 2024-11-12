@@ -114,9 +114,11 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'pinjobs',  # Replace with your database name
-        'USER': 'root',  # Replace with your database username
-        'PASSWORD': '',  # Replace with your database password
-        'HOST': 'localhost',  # Replace if your MySQL server is hosted elsewhere
+        'USER': 'salim',  # Replace with your database username
+        # 'USER': 'root',  # Replace with your database username
+        'PASSWORD': 'salim',  # Replace with your database password
+        # 'PASSWORD': '',  # Replace with your database password
+        'HOST': 'mysql-vc2i',  # Replace if your MySQL server is hosted elsewhere
         'PORT': '3306',  # Default MySQL port
     }
 }
