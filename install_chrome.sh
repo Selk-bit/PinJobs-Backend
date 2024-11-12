@@ -4,17 +4,16 @@
 mkdir -p $HOME/bin
 cd $HOME/bin
 
-# Download a standalone Chrome binary
+# Download and extract Chrome using dpkg-deb
 wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-ar x google-chrome-stable_current_amd64.deb data.tar.xz
-tar -xf data.tar.xz --strip 2 -C $HOME/bin opt/google/chrome/google-chrome
+dpkg-deb -x google-chrome-stable_current_amd64.deb $HOME/bin
 
 # Set Chrome binary path
-export CHROME_BIN=$HOME/bin/google-chrome
+export CHROME_BIN=$HOME/bin/opt/google/chrome/google-chrome
 
 # Get the exact Chrome version
 CHROME_VERSION=$($CHROME_BIN --version | awk '{print $3}' | cut -d '.' -f 1)
-CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
+CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION" || echo "latest")
 
 # Fallback to the latest ChromeDriver if version retrieval fails
 if [[ -z "$CHROMEDRIVER_VERSION" ]]; then
