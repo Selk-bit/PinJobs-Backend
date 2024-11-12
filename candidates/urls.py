@@ -4,7 +4,8 @@ from .views import (
     CandidateViewSet, CVViewSet, CVDataViewSet, JobViewSet, JobSearchViewSet,
     PaymentViewSet, CreditPurchaseViewSet, SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView,
     TriggerScrapingView, LogoutView, CurrentUserView, UpdateCandidateView, ChangePasswordView, CandidateJobsView,
-    DeleteJobSearchView, UpdateJobSearchStatusView, CVDataView, DeleteCVView, UpdateOrCreateCVDataView
+    DeleteJobSearchView, UpdateJobSearchStatusView, CVDataView, DeleteCVView, UpdateOrCreateCVDataView,
+    TemplateDetailView, TopUpView, TopUpConfirmView
 )
 from django.contrib.auth import views as auth_views
 
@@ -38,4 +39,7 @@ urlpatterns = [
     path('cv-data/', CVDataView.as_view(), name='cv-data'),
     path('cv/<int:cv_id>/delete/', DeleteCVView.as_view(), name='delete-cv'),
     path('cv/update-cvdata/', UpdateOrCreateCVDataView.as_view(), name='update-cvdata'),
+    path('cv/template/', TemplateDetailView.as_view(), name='template-detail'),
+    path('top-up', TopUpView.as_view(), name='top-up'),
+    path('top-up-confirm', TopUpConfirmView.as_view(), name='top-up-confirm'),
 ]

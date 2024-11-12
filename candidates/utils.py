@@ -20,6 +20,29 @@ import shutil
 from .constants import *
 from .models import Job, JobSearch
 from django.core.files.storage import default_storage
+from paypalcheckoutsdk.core import PayPalHttpClient, SandboxEnvironment
+
+client_id = os.getenv('PAYPAL_CLIENT_ID')
+client_secret = os.getenv('PAYPAL_CLIENT_SECRET')
+environment = SandboxEnvironment(client_id=client_id, client_secret=client_secret)
+paypal_client = PayPalHttpClient(environment)
+PRICE_TABLE = {
+    20: 60,
+    40: 120,
+    60: 180,
+    80: 240,
+    100: 300,
+    200: 398,
+    400: 796,
+    600: 1194,
+    800: 1592,
+    1000: 1990,
+    2000: 1980,
+    4000: 3960,
+    6000: 5940,
+    8000: 7920,
+    10000: 9900
+}
 
 
 def get_gemini_response(prompt):
@@ -45,9 +68,9 @@ def get_options():
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
+    # chrome_options.add_argument("--headless")
+    # chrome_options.add_argument('--no-sandbox')
+    # chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -428,7 +451,7 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                     parent_elem = anchor.find_element(By.XPATH, "..")
                     driver.execute_script("arguments[0].scrollIntoView();", anchor)
                     time.sleep(random.uniform(0.5, 1.5))  # Give time for new jobs to load
-                    job_title_xpath = f"//h2[contains(text(), '{anchor.text.strip()}')]"
+                    job_title_xpath = f"//h2[contains(text(), '{(anchor.text).split()[0].strip()}')]"
                     move_result = move_until_found(driver, job_title_xpath, 100, TITLE_XPATH, anchor, previous_anchor)
                     if move_result == 'sign_in':
                         print("Sign-in detected during job scraping, visiting random sites.")

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase
+from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Modele, Template
 from django.contrib.auth.models import User
 
 
@@ -21,6 +21,24 @@ class CVSerializer(serializers.ModelSerializer):
     class Meta:
         model = CV
         fields = ['id', 'candidate', 'original_file', 'generated_html', 'generated_pdf', 'created_at', 'updated_at']
+
+
+class ModeleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Modele
+        fields = [
+            "identity", "template", "company_logo", "page", "certifications", "education",
+            "experience", "volunteering", "interests", "languages", "projects",
+            "references", "skills", "social", "theme", "personnel", "typography"
+        ]
+
+
+class TemplateSerializer(serializers.ModelSerializer):
+    templateData = ModeleSerializer()
+
+    class Meta:
+        model = Template
+        fields = ["id", "name", "language", "reference", "templateData"]
 
 
 class CVDataSerializer(serializers.ModelSerializer):

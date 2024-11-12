@@ -1,8 +1,25 @@
 from django.contrib import admin
-from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase
+from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
 from django_celery_results.models import TaskResult
+
+
+@admin.register(Modele)
+class ModeleAdmin(admin.ModelAdmin):
+    list_display = ['id', 'identity', 'template']
+    formfield_overrides = {
+        models.JSONField: {'widget': JSONEditorWidget},
+    }
+    search_fields = ['identity', 'template']
+    list_filter = ['template']
+
+
+@admin.register(Template)
+class TemplateAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'language', 'reference']
+    search_fields = ['name', 'reference', 'language']
+    list_filter = ['language']
 
 
 @admin.register(Candidate)
@@ -49,12 +66,6 @@ class JobAdmin(admin.ModelAdmin):
 class JobSearchAdmin(admin.ModelAdmin):
     list_display = ('job', 'candidate', 'similarity_score', 'search_date')
     search_fields = ('candidate__first_name', 'job__title')
-
-
-@admin.register(Payment)
-class PaymentAdmin(admin.ModelAdmin):
-    list_display = ('id', 'candidate', 'amount', 'currency', 'payment_method', 'status', 'timestamp')
-    search_fields = ('candidate__first_name', 'transaction_id')
 
 
 @admin.register(CreditPurchase)

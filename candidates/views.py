@@ -1,6 +1,7 @@
 from rest_framework import viewsets
-from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase
-from .serializers import CandidateSerializer, CVSerializer, CVDataSerializer, JobSerializer, JobSearchSerializer, PaymentSerializer, CreditPurchaseSerializer
+from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele, CreditOrder
+from .serializers import (CandidateSerializer, CVSerializer, CVDataSerializer, JobSerializer, JobSearchSerializer,
+                          PaymentSerializer, CreditPurchaseSerializer, TemplateSerializer)
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -25,6 +26,9 @@ import django_filters
 from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
 from datetime import datetime
+from .utils import paypal_client, PRICE_TABLE
+from paypalcheckoutsdk.orders import OrdersCreateRequest, OrdersCaptureRequest
+from django.db import transaction
 
 
 class CandidateViewSet(viewsets.ModelViewSet):
@@ -463,11 +467,23 @@ class DeleteCVView(APIView):
             # Retrieve the CV associated with the candidate and the given cv_id
             cv = CV.objects.get(id=cv_id, candidate=candidate)
 
-            # Delete the CV and its related CVData
+            # Retrieve the Template and Modele associated with the CV, if they exist
+            template = cv.template
+            modele = template.templateData if template else None
+
+            # Delete the CVData associated with the CV
             CVData.objects.filter(cv=cv).delete()
+
+            # Delete the CV
             cv.delete()
 
-            return Response({"detail": "CV and associated CVData deleted successfully"},
+            # Delete the Template and Modele if they exist
+            if template:
+                if modele:
+                    modele.delete()
+                template.delete()
+
+            return Response({"detail": "CV, associated CVData, Template, and Modele deleted successfully"},
                             status=status.HTTP_204_NO_CONTENT)
 
         except CV.DoesNotExist:
@@ -958,3 +974,141 @@ class TriggerScrapingView(APIView):
         run_scraping_task(candidate_id=candidate.id, keyword=keyword, location=location, num_jobs_to_scrape=num_jobs_to_scrape, manual=True)
 
         return Response({"message": "Job scraping has been triggered manually."}, status=status.HTTP_200_OK)
+
+
+class TemplateDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        candidate = request.user.candidate
+        cv = CV.objects.filter(candidate=candidate).first()
+
+        if cv and cv.template:
+            serializer = TemplateSerializer(cv.template)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response({"detail": "Template not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def post(self, request):
+        candidate = request.user.candidate
+        data = request.data
+        # Get the CV for the candidate
+        cv = CV.objects.filter(candidate=candidate).first()
+        if not cv:
+            return Response({"detail": "CV not found for candidate"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if template exists in CV
+        template = cv.template
+        created = False
+
+        # Handle creation or updating of Modele associated with Template
+        modele_data = data.pop('templateData', None)
+        if not template:
+            # Create new Modele and Template if they don't exist
+            if modele_data:
+                modele = Modele.objects.create(**modele_data)
+                template = Template.objects.create(
+                    name=data.get('name', ''),
+                    language=data.get('language', 'en'),
+                    reference=data.get('reference', None),
+                    templateData=modele
+                )
+                cv.template = template
+                cv.save()
+                created = True
+        else:
+            # Update existing Modele
+            if modele_data and template.templateData:
+                for attr, value in modele_data.items():
+                    setattr(template.templateData, attr, value)
+                template.templateData.save()
+
+            # Update Template fields
+            for attr, value in data.items():
+                setattr(template, attr, value)
+            template.save()
+
+        # Serialize and return updated or created Template data
+        serializer = TemplateSerializer(template)
+        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class TopUpView(APIView):
+    def post(self, request):
+        credits = request.data.get('credits')
+
+        # Validate credits amount
+        if credits not in PRICE_TABLE:
+            return Response({"error": "Invalid credit amount"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Calculate the price based on the credits
+        amount = PRICE_TABLE[credits]
+
+        # Create the PayPal order request
+        create_request = OrdersCreateRequest()
+        create_request.prefer("return=representation")
+        create_request.request_body({
+            "intent": "CAPTURE",
+            "purchase_units": [{
+                "amount": {
+                    "currency_code": "USD",
+                    "value": str(amount)
+                }
+            }]
+        })
+
+        # Execute the request
+        try:
+            response = paypal_client.execute(create_request)
+            order_id = response.result.id
+
+            # Save the order to the database
+            candidate = request.user.candidate
+            CreditOrder.objects.create(
+                credits=credits,
+                order_id=order_id,
+                candidate=candidate
+            )
+
+            return Response({"orderId": order_id}, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class TopUpConfirmView(APIView):
+    def post(self, request):
+        order_id = request.data.get('orderId')
+        candidate = request.user.candidate
+
+        if not order_id:
+            return Response({"error": "Order ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch the order to ensure it exists and is associated with the candidate
+        try:
+            order = CreditOrder.objects.get(order_id=order_id, candidate=candidate, paid=False)
+        except CreditOrder.DoesNotExist:
+            return Response({"error": "Order not found or already paid"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Capture the order through PayPal
+        capture_request = OrdersCaptureRequest(order_id)
+        try:
+            capture_response = paypal_client.execute(capture_request)
+            capture_status = capture_response.result.status
+
+            if capture_status == "COMPLETED":
+                with transaction.atomic():
+                    # Mark the order as paid
+                    order.paid = True
+                    order.save()
+
+                    # Increment the candidate's credits
+                    candidate.credits += order.credits
+                    candidate.save()
+
+                return Response({"status": "COMPLETED"}, status=status.HTTP_200_OK)
+
+            return Response({"status": capture_status}, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
