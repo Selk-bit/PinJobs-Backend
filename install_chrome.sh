@@ -26,7 +26,7 @@ if [[ -z "$CHROMEDRIVER_VERSION" ]]; then
 fi
 
 # Download ChromeDriver
-wget -N "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" -P $HOME/bin
+wget -N "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.69/linux64/chromedriver-linux64.zip" -P $HOME/bin
 unzip $HOME/bin/chromedriver_linux64.zip -d $HOME/bin
 chmod +x $HOME/bin/chromedriver
 
