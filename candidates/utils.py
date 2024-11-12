@@ -68,9 +68,9 @@ def get_options():
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    # chrome_options.add_argument("--headless")
-    # chrome_options.add_argument('--no-sandbox')
-    # chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -378,7 +378,8 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             # version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
             folder = 'chromedriver/'
-            service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
+            # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
+            service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver")}")
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.maximize_window()
             # Visit a random popular website instead of Google
