@@ -13,6 +13,11 @@ export CHROME_BIN=$HOME/bin/opt/google/chrome/google-chrome
 
 # Get the exact Chrome version
 CHROME_VERSION=$($CHROME_BIN --version | awk '{print $3}' | cut -d '.' -f 1)
+
+# Echo the Chrome version for debugging
+echo "Installed Chrome version: $CHROME_VERSION"
+
+# Retrieve the corresponding ChromeDriver version
 CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION" || echo "latest")
 
 # Fallback to the latest ChromeDriver if version retrieval fails
