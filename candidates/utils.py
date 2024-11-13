@@ -76,7 +76,7 @@ def get_options():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
-    chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
+    # chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
     # chrome_options.binary_location = f"{default_storage.open(f"{folder}chromedriver.exe")}"
     return chrome_options
 
