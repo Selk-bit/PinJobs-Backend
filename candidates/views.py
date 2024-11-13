@@ -634,7 +634,7 @@ class LinkedInCVView(APIView):
             'personal_contact_number': 'include',
             'personal_email': 'include',
             'skills': 'include',
-            'use_cache': 'if-present',
+            'use_cache': 'if-recent',
             'fallback_to_cache': 'on-error',
         }
 
