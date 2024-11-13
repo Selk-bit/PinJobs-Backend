@@ -32,7 +32,7 @@ SECRET_KEY = 'django-insecure-2xcxt#4wfn87%_9(1$^3w@(7+ynt*9_9(f(%2tvdcoai97$q&u
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["pinjobs-backend.onrender.com"]
+ALLOWED_HOSTS = ["pinjobs-backend.onrender.com", "127.0.0.1"]
 
 
 # Application definition
@@ -110,18 +110,28 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.mysql',
+#         'NAME': 'pinjobs',  # Replace with your database name
+#         'USER': 'root',  # Replace with your database username
+#         'PASSWORD': '',  # Replace with your database password
+#         'HOST': 'localhost',  # Replace if your MySQL server is hosted elsewhere
+#         'PORT': '3306',  # Default MySQL port
+#     }
+# }
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'pinjobs',  # Replace with your database name
         'USER': 'salim',  # Replace with your database username
-        # 'USER': 'root',  # Replace with your database username
         'PASSWORD': 'salim',  # Replace with your database password
-        # 'PASSWORD': '',  # Replace with your database password
         'HOST': 'mysql-mq46',  # Replace if your MySQL server is hosted elsewhere
         'PORT': '3306',  # Default MySQL port
     }
 }
+os.environ["PATH"] += os.pathsep + os.path.join(os.getenv("HOME"), "bin")
 
 
 # Password validation
