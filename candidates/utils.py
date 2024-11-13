@@ -386,8 +386,6 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
                     # Only print if it's a file (not a directory)
                     if os.path.isfile(os.path.join(os.path.join(os.getenv("HOME"), "bin"), file_name)):
                         print(file_name)
-            else:
-                print(f"The folder '{os.path.join(os.getenv("HOME"), "bin")}' does not exist or is not a directory.")
             service = Service(executable_path=os.path.join(os.getenv("HOME"), "bin", "chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.maximize_window()
