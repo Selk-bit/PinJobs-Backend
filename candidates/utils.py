@@ -77,7 +77,7 @@ def get_options():
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
     # chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
-    # chrome_options.binary_location = "/opt/render/bin/opt/google/chrome/google-chrome"
+    chrome_options.binary_location = "/opt/render/bin/opt/google/chrome/cron/google-chrome"
     return chrome_options
 
 
