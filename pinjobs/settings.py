@@ -119,7 +119,7 @@ DATABASES = {
         'PASSWORD': 'salim',  # Replace with your database password
         # 'PASSWORD': '',  # Replace with your database password
         'HOST': 'mysql-mq46',  # Replace if your MySQL server is hosted elsewhere
-        'PORT': '10000',  # Default MySQL port
+        'PORT': '3306',  # Default MySQL port
     }
 }
 
