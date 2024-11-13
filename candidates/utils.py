@@ -379,7 +379,7 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             # version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
             folder = './chromedriver/'
-            print(os.path.abspath(folder), "chromedriver"))
+            print(os.path.join(os.path.abspath(folder), "chromedriver"))
             # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
             service = Service(executable_path=os.path.join(os.path.abspath(folder), "chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
