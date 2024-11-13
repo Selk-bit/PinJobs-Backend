@@ -20,6 +20,10 @@ CHROME_VERSION=$($CHROME_BIN --version | awk '{print $3}' | cut -d '.' -f 1)
 # Echo the Chrome version for debugging
 echo "Installed Chrome version: $CHROME_VERSION"
 
+# Query and echo the Chrome binary path without using CHROME_BIN variable
+CHROME_PATH=$(find $HOME/bin -name google-chrome -type f)
+echo "Chrome binary path: $CHROME_PATH"
+
 # Retrieve the corresponding ChromeDriver version
 CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION" || echo "latest")
 
@@ -35,10 +39,11 @@ rm -f chromedriver-linux64.zip*
 wget -N "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.69/linux64/chromedriver-linux64.zip" -P $HOME/bin
 unzip -o $HOME/bin/chromedriver-linux64.zip -d $HOME/bin
 
-
 # Move the chromedriver binary from the nested folder to $HOME/bin
 mv $HOME/bin/chromedriver-linux64/chromedriver $HOME/bin/chromedriver
 chmod +x $HOME/bin/chromedriver
+
+# Custom chmod on the chromedriver binary
 chmod 777 /opt/render/project/src/chromedriver/chromedriver
 
 # Clean up the extracted folder and zip file
