@@ -380,7 +380,8 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
             folder = 'chromedriver/'
             # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
-            service = Service(executable_path=os.path.join(os.path.expanduser("~"), "bin", "chromedriver"))
+            print(os.path.join(os.path.expanduser("~"), "bin", "chromedriver-linux64", "chromedriver"))
+            service = Service(executable_path=os.path.join(os.path.expanduser("~"), "bin", "chromedriver-linux64", "chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.maximize_window()
             # Visit a random popular website instead of Google
