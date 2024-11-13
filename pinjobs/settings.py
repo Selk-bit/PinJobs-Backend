@@ -118,8 +118,8 @@ DATABASES = {
         # 'USER': 'root',  # Replace with your database username
         'PASSWORD': 'salim',  # Replace with your database password
         # 'PASSWORD': '',  # Replace with your database password
-        'HOST': 'mysql-vc2i',  # Replace if your MySQL server is hosted elsewhere
-        'PORT': '3306',  # Default MySQL port
+        'HOST': 'mysql-mq46',  # Replace if your MySQL server is hosted elsewhere
+        'PORT': '10000',  # Default MySQL port
     }
 }
 
