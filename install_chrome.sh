@@ -4,6 +4,9 @@
 mkdir -p $HOME/bin
 cd $HOME/bin
 
+# Remove any existing Chrome .deb files with versioned extensions if they exist
+rm -f google-chrome-stable_current_amd64.deb*
+
 # Download and extract Chrome using dpkg-deb
 wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 dpkg-deb -x google-chrome-stable_current_amd64.deb $HOME/bin
@@ -24,6 +27,9 @@ CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATE
 if [[ -z "$CHROMEDRIVER_VERSION" ]]; then
     CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE")
 fi
+
+# Remove any existing ChromeDriver zip files if they exist
+rm -f chromedriver-linux64.zip*
 
 # Download ChromeDriver
 wget -N "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.69/linux64/chromedriver-linux64.zip" -P $HOME/bin
