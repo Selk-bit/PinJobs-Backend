@@ -15,7 +15,7 @@ dpkg-deb -x google-chrome-stable_current_amd64.deb $HOME/bin
 export CHROME_BIN=$HOME/bin/opt/google/chrome/google-chrome
 
 # Get the exact Chrome version
-CHROME_VERSION=$($CHROME_BIN --version | awk '{print $3}' | cut -d '.' -f 1)
+CHROME_VERSION=$($CHROME_BIN --version | awk '{print $3}')
 
 # Echo the Chrome version for debugging
 echo "Installed Chrome version: $CHROME_VERSION"
