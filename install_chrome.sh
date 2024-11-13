@@ -34,7 +34,14 @@ rm -f chromedriver-linux64.zip*
 # Download ChromeDriver
 wget -N "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.69/linux64/chromedriver-linux64.zip" -P $HOME/bin
 unzip $HOME/bin/chromedriver-linux64.zip -d $HOME/bin
-chmod +x $HOME/bin/chromedriver-linux64/chromedriver
+
+# Move the chromedriver binary from the nested folder to $HOME/bin
+mv $HOME/bin/chromedriver-linux64/chromedriver $HOME/bin/chromedriver
+chmod +x $HOME/bin/chromedriver
+
+# Clean up the extracted folder and zip file
+rm -rf $HOME/bin/chromedriver-linux64
+rm -f $HOME/bin/chromedriver-linux64.zip
 
 # Update PATH
 export PATH=$PATH:$HOME/bin
