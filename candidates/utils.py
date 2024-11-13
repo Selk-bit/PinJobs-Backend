@@ -380,7 +380,14 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
             folder = 'chromedriver/'
             # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
-            print(os.path.join(os.getenv("HOME"), "bin", "chromedriver"))
+            if os.path.isdir(os.path.join(os.getenv("HOME"), "bin")):
+                # Iterate over each item in the folder
+                for file_name in os.listdir(os.path.join(os.getenv("HOME"), "bin")):
+                    # Only print if it's a file (not a directory)
+                    if os.path.isfile(os.path.join(os.path.join(os.getenv("HOME"), "bin"), file_name)):
+                        print(file_name)
+            else:
+                print(f"The folder '{os.path.join(os.getenv("HOME"), "bin")}' does not exist or is not a directory.")
             service = Service(executable_path=os.path.join(os.getenv("HOME"), "bin", "chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.maximize_window()
