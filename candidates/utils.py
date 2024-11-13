@@ -68,17 +68,16 @@ def get_options():
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    # chrome_options.add_argument("--headless")
-    # chrome_options.add_argument('--no-sandbox')
-    # chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
     # chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
-    chrome_options.binary_location = "/opt/render/bin/opt/google/chrome/google-chrome"
-    # chrome_options.binary_location = f"{default_storage.open(f"{folder}chromedriver.exe")}"
+    # chrome_options.binary_location = "/opt/render/bin/opt/google/chrome/google-chrome"
     return chrome_options
 
 
