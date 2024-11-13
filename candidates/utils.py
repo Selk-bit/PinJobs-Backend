@@ -378,15 +378,15 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             chrome_options = get_options()
             # version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
-            folder = 'chromedriver/'
+            folder = './chromedriver/'
             # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
-            if os.path.isdir("./chromedriver/"):
+            if os.path.isdir(folder):
                 # Iterate over each item in the folder
-                for file_name in os.listdir("./chromedriver/"):
+                for file_name in os.listdir(folder):
                     # Only print if it's a file (not a directory)
-                    if os.path.isfile(os.path.join("./chromedriver/", file_name)):
+                    if os.path.isfile(os.path.join(folder, file_name)):
                         print(file_name)
-            service = Service(executable_path=os.path.join(os.getenv("HOME"), "bin", "chromedriver"))
+            service = Service(executable_path=os.path.join(os.path.abspath(folder), "chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.maximize_window()
             # Visit a random popular website instead of Google
