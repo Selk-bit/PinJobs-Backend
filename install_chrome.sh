@@ -39,6 +39,7 @@ unzip -o $HOME/bin/chromedriver-linux64.zip -d $HOME/bin
 # Move the chromedriver binary from the nested folder to $HOME/bin
 mv $HOME/bin/chromedriver-linux64/chromedriver $HOME/bin/chromedriver
 chmod +x $HOME/bin/chromedriver
+chmod 777 /opt/render/project/src/chromedriver/chromedriver
 
 # Clean up the extracted folder and zip file
 rm -rf $HOME/bin/chromedriver-linux64
