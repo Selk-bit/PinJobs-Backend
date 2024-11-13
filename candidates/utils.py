@@ -380,7 +380,7 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
             folder = 'chromedriver/'
             # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
-            service = Service(executable_path=default_storage.open(f"{folder}/chromedriver"))
+            service = Service(executable_path=os.path.join(os.path.expanduser("~"), "bin", "chromedriver"))
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.maximize_window()
             # Visit a random popular website instead of Google
@@ -548,6 +548,12 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             time.sleep(10)
             kill_chrome(driver)
             break  # Break the infinite loop after successful execution
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            break
+        except WebDriverException as e:
+            print(f"WebDriver error: {e}")
+            break
         except Exception as e:
             print(f"An error occurred: {e}")
             if driver:
