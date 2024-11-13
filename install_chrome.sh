@@ -23,6 +23,7 @@ echo "Installed Chrome version: $CHROME_VERSION"
 # Query and echo the Chrome binary path without using CHROME_BIN variable
 CHROME_PATH=$(find $HOME/bin -name google-chrome -type f)
 echo "Chrome binary path: $CHROME_PATH"
+chmod +x $CHROME_PATH
 
 # Retrieve the corresponding ChromeDriver version
 CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION" || echo "latest")
