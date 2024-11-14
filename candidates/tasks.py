@@ -74,26 +74,26 @@ def run_scraping_task(candidate_id=None, keyword=None, location=None, num_jobs_t
         num_jobs_to_scrape = candidate.num_jobs_to_scrape
 
     # Start the scraping process and mark candidate as scraping
-    candidate.is_scraping = True
-    candidate.save()
-
-    try:
-        # Call the scrape_jobs function with the provided parameters
-        cv_data = get_cv_data(candidate)
-        candidate_data = {
-            'title': keyword,
-            'city': location,
-            'candidate': candidate
-        }
-        scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape)
-
-
-        # Update the candidate when scraping completes
-        candidate.last_scrape_time = timezone.now()
-    except Exception as e:
-        # Log the error or handle it appropriately
-        print(f"Error in scraping: {e}")
-    finally:
-        # Ensure we mark the scraping status as false after completion
-        candidate.is_scraping = False
+    if not candidate.is_scraping:
+        candidate.is_scraping = True
         candidate.save()
+        try:
+            # Call the scrape_jobs function with the provided parameters
+            cv_data = get_cv_data(candidate)
+            candidate_data = {
+                'title': keyword,
+                'city': location,
+                'candidate': candidate
+            }
+            scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape)
+
+
+            # Update the candidate when scraping completes
+            candidate.last_scrape_time = timezone.now()
+        except Exception as e:
+            # Log the error or handle it appropriately
+            print(f"Error in scraping: {e}")
+        finally:
+            # Ensure we mark the scraping status as false after completion
+            candidate.is_scraping = False
+            candidate.save()

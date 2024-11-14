@@ -269,7 +269,7 @@ def kill_chrome(driver):
         driver.quit()
     except Exception as e:
         print(f"Error closing driver: {e}")
-    # kill_chrome_processes()
+    kill_chrome_processes()
     # clear_recent_temp_files(get_temp_dir(), age_minutes=200)
 
 
