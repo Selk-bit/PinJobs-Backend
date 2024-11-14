@@ -77,7 +77,7 @@ def get_options():
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
     # chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
-    chrome_options.binary_location = "~/chromium/chrome-linux/chrome"
+    chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
     return chrome_options
 
 
@@ -379,11 +379,6 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             # version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
             # driver = uc.Chrome(options=chrome_options, version_main=version_main)
             folder = './chromedriver/'
-            chrome_path = shutil.which("google-chrome") or shutil.which("chrome") or shutil.which("chromium")
-            if chrome_path:
-                print("Chrome binary path: " + str(chrome_path))
-            else:
-                print("Chrome binary not found on the system.")
             # print(os.path.join(os.path.abspath(folder), "chromedriver"))
             # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
             service = Service(executable_path=os.path.join(os.path.abspath(folder), "chromedriver"))
