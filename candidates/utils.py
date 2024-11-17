@@ -5,23 +5,26 @@ import random
 import platform
 import json
 import time
-from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium import webdriver
-import undetected_chromedriver as uc
-import chromedriver_autoinstaller
 import urllib.parse
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import psutil
 import shutil
 from .constants import *
-from .models import Job, JobSearch
+from .models import Job, JobSearch, Notification
 from django.core.files.storage import default_storage
 from paypalcheckoutsdk.core import PayPalHttpClient, SandboxEnvironment
+from bs4 import BeautifulSoup
+import re
+import asyncio
+import aiohttp
+from datetime import datetime
+import requests
+from fake_useragent import UserAgent
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
+ua = UserAgent()
 client_id = os.getenv('PAYPAL_CLIENT_ID')
 client_secret = os.getenv('PAYPAL_CLIENT_SECRET')
 environment = SandboxEnvironment(client_id=client_id, client_secret=client_secret)
@@ -68,24 +71,32 @@ def get_options():
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
+    # chrome_options.add_argument("--headless")
+    # chrome_options.add_argument('--no-sandbox')
+    # chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
     # chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
-    chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
+    # chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
     return chrome_options
 
 
 def construct_url(keyword, location):
     keyword_encoded = urllib.parse.quote(keyword)
     location_encoded = urllib.parse.quote(location)
-    url = f"https://www.linkedin.com/jobs/search?keywords={keyword_encoded}&location={location_encoded}&position=1&pageNum=0&f_TPR=r2592000"
+    url = f"https://www.linkedin.com/jobs/search?keywords={keyword_encoded}&location={location_encoded}&position=1&pageNum=0"
     return url
+
+
+def construct_pagination_url(original_url, start):
+    # Replace '/jobs/' with '/jobs-guest/jobs/api/seeMoreJobPostings/'
+    pagination_url = original_url.replace('/jobs/', '/jobs-guest/jobs/api/seeMoreJobPostings/')
+    # Add '&start=X' to the URL
+    pagination_url += f"&start={start}"
+    return pagination_url
 
 
 def get_title(driver, xpath):
@@ -269,7 +280,7 @@ def kill_chrome(driver):
         driver.quit()
     except Exception as e:
         print(f"Error closing driver: {e}")
-    kill_chrome_processes()
+    # kill_chrome_processes()
     # clear_recent_temp_files(get_temp_dir(), age_minutes=200)
 
 
@@ -279,7 +290,7 @@ def construct_prompt(candidate_profile, jobs_data):
     json_format = {
         "title": "string",
         "description": "string",
-        "requirements": "list of strings (try extracting requirements from the description if they're not clearly listed)",
+        "requirements": "list of strings (try extracting requirements from the description if they're not clearly listed, don't list required hard skills, but other contextual requirements if found)",
         "company_name": "string",
         "company_size": "integer (set null if it's not available)",
         "location": "string (set null if it's not available)",
@@ -363,201 +374,281 @@ def construct_prompt(candidate_profile, jobs_data):
 
 
 def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
-    # Read candidate profile from candidate.json
+    # Read candidate profile
     candidate_profile = candidate_data
     candidate = candidate_profile['candidate']
     partial_jobs_collected = []
     total_jobs_collected = []
     anchors_processed = set()
-    while True:  # Loop infinitely until the job is done
-        driver = None  # Initialize driver to None at the start of each loop
-        try:
-            keyword = candidate_profile['title']
-            location = candidate_profile['city']
-            url = construct_url(keyword, location)
-            chrome_options = get_options()
-            # version_main = int(chromedriver_autoinstaller.get_chrome_version().split(".")[0])
-            # driver = uc.Chrome(options=chrome_options, version_main=version_main)
-            folder = './chromedriver/'
-            # print(os.path.join(os.path.abspath(folder), "chromedriver"))
-            # service = Service(executable_path=f"{default_storage.open(f"{folder}chromedriver.exe")}")
-            service = Service(executable_path=os.path.join(os.path.abspath(folder), "chromedriver"))
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.maximize_window()
-            # Visit a random popular website instead of Google
-            initial_site = random.choice(POPULAR_WEBSITES)
-            driver.get(initial_site)
-            time.sleep(random.uniform(1, 3))
 
-            while True:
-                existing_job_searches = JobSearch.objects.filter(candidate=candidate)
-                already_scraped_urls = [job_search.job.original_url for job_search in existing_job_searches]
-                try:
-                    driver.get(url)
-                    print(f"Visiting URL: {url}")
-                    time.sleep(random.uniform(1, 3))  # Give time for the page to load
-                except (WebDriverException, TimeoutException) as e:
-                    print(f"Connection error: {e}")
-                    raise Exception("Connection error encountered, restarting...")
+    # Extract keyword and location from candidate profile
+    keyword = candidate_profile['title']
+    location = candidate_profile['city']
 
-                # Check if we are redirected to the home page
-                if check_exists_by_xpath(driver, JOB_RESULTS_XPATH):
-                    break  # Exit the loop if SIGN_IN_BUTTON_XPATH is not found
-                # If SIGN_IN_BUTTON_XPATH is found, visit 2-3 random websites
-                num_sites = random.randint(2, 3)
-                for _ in range(num_sites):
-                    random_site = random.choice(POPULAR_WEBSITES)
-                    driver.get(random_site)
-                    time.sleep(random.uniform(1, 3))
+    # Construct the search URL
+    multiple_jobs_url = construct_url(keyword, location)
 
-            if check_exists_by_xpath(driver, MODAL_DISMISS_XPATH):
-                print("Remove Modal")
-                click_forcefully(driver, driver.find_element(By.XPATH, MODAL_DISMISS_XPATH), True, "//body")
+    # Headers for the HTTP requests
+    multiple_jobs_headers = {
+        "User-Agent": f"Mozilla/5.0 (Windows NT {random.randint(6, 10)}.{random.randint(0, 3)}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(80, 95)}.0.{random.randint(3000, 4000)}.{random.randint(100, 150)} Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Cookie": 'lang=v=2&lang=en-us; bcookie="v=2&13690459-2695-4db8-8920-eb8acafd8bb0"; lidc="b=OGST01:s=O:r=O:a=O:p=O:g=3446:u=1:x=1:i=1731604780:t=1731691180:v=2:sig=AQH9Fke10UQG9Y2cVZtB9GxcuhLRjHYT"; __cf_bm=t1G.2BT5aBYyrtSdXb1i1P1C62LySBfwfGB0qPAeJKM-1731604780-1.0.1.1-vsyEyIXbZoIk2K9ZdnwsX_JX50i.PWUOGpCco0p_8YN4Ox9urlWJdFzhWVcmSx2mMfquMeUrLfJB4OmWaplE_g; JSESSIONID=ajax:7418003674519976640; bscookie="v=1&20241114171953262036d0-c9e0-4821-8104-95261fbea1f2AQGQhsqDVF82rmiyryMBtG9R_9mqrteN"; AMCVS_14215E3D5995C57C0A495C55%40AdobeOrg=1; AMCV_14215E3D5995C57C0A495C55%40AdobeOrg=-637568504%7CMCIDTS%7C20042%7CMCMID%7C24006825359064228502848929369249235580%7CMCAAMLH-1732209601%7C6%7CMCAAMB-1732209601%7C6G1ynYcLPuiQxYZrsz_pkqfLG9yMXBpb2zX5dvJdYQJzPXImdj0y%7CMCOPTOUT-1731612001s%7CNONE%7CvVersion%7C5.1.1; aam_uuid=24229005248847717212830020980619194807; _gcl_au=1.1.1528757662.1731604801; ccookie=0001AQGJ9Xfxg73P4wAAAZMrsWe4+zApGcXdE5zp5BKFyMPBrHTrMd+HPwNATFZpf3K6yYhWGy2cxQN+vft6FExugPGJMfXh49ZkQd/J9FOALHHAvt1wIQ3G5zTTqlpL6u+YtBHNSdhX62lCOcKPgISJ2Jsn3ifKnxsiOANIowr213txeQ==; _uetsid=ae1cad00a2ac11ef941fe55ffdabcbc5; _uetvid=ae1cc490a2ac11efa8cd6b2dc3fdb04a',
+        "Upgrade-Insecure-Requests": "1"
+    }
 
-            move_result = move_until_found(driver, ANCHORS_XPATH, 100)
-            if move_result == 'sign_in':
-                print("Sign-in detected during move_until_found, visiting random sites.")
-                num_sites = random.randint(2, 3)
-                for _ in range(num_sites):
-                    random_site = random.choice(POPULAR_WEBSITES)
-                    driver.get(random_site)
-                    time.sleep(random.uniform(1, 3))
-                continue  # Restart the scraping loop
+    def fetch_page_with_retry(url, headers, substring, max_retries=50):
+        for _ in range(max_retries):
+            r = requests.get(url, headers=headers)
+            if substring in r.text:
+                return r.text
+            else:
+                sleep_time = random.uniform(0, 3)
+                time.sleep(sleep_time)
+        return None
 
-            previous_anchor = None
+    # Fetch and parse the job listings
+    jobs_data = []
 
-            while len(total_jobs_collected) < num_jobs_to_scrape:
-                anchors = driver.find_elements(By.XPATH, ANCHORS_XPATH)
-                anchors_to_process = []
+    # Fetch the initial page
+    print(multiple_jobs_url)
+    initial_page_text = fetch_page_with_retry(multiple_jobs_url, multiple_jobs_headers, "job-search-card__listdate", 50)
+    if initial_page_text is None:
+        print("Failed to fetch initial page.")
+        return
 
-                for anchor in anchors:
-                    job_link = anchor.get_attribute('href')
-                    if job_link and job_link not in anchors_processed and (job_link.split("?")[0]).strip() not in already_scraped_urls:
-                        anchors_processed.add(job_link)
-                        anchors_to_process.append(anchor)
+    # Parse the initial page
+    soup = BeautifulSoup(initial_page_text, 'html.parser')
+    job_listings = soup.find_all('li')
 
-                if not anchors_to_process:
-                    # Scroll to load more jobs
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(random.uniform(1, 2))
-                    # Check if new anchors are loaded
-                    new_anchors = driver.find_elements(By.XPATH, ANCHORS_XPATH)
-                    if len(new_anchors) == len(anchors):
-                        # No new anchors loaded, break
-                        break
+    existing_job_searches = JobSearch.objects.filter(candidate=candidate)
+    already_scraped_urls = [job_search.job.original_url for job_search in existing_job_searches]
+
+    # Extract total number of jobs from the title
+    title_tag = soup.find('title')
+    if title_tag:
+        title_text = title_tag.get_text()
+        match = re.search(r'(\d+)', title_text.replace(',', ''))
+        if match:
+            total_jobs = int(match.group(1))
+        else:
+            total_jobs = len(job_listings)
+    else:
+        total_jobs = len(job_listings)
+
+    # Calculate start values for pagination
+    start_values = list(range(25, total_jobs, 25))
+
+    # Function to process job listings from a page
+    def process_job_listings(soup):
+        job_listings = soup.find_all('li')
+        for li in job_listings:
+            base_card = li.find('div', class_='base-card')
+            if base_card:
+                # Extract the href
+                a_tag = base_card.find('a', class_='base-card__full-link')
+                if a_tag and 'href' in a_tag.attrs:
+                    job_url = a_tag['href']
+                    if not job_url.startswith('http'):
+                        job_url = 'https://www.linkedin.com' + job_url
+                    # Avoid duplicates
+                    job_url_no_query = job_url.split("?")[0]
+                    if job_url_no_query in anchors_processed or job_url_no_query in already_scraped_urls:
+                        continue
+                    anchors_processed.add(job_url_no_query)
+                    # Extract datetime
+                    time_tag = base_card.find('time', class_=re.compile('job-search-card__listdate'))
+                    job_datetime_str = None
+                    if time_tag and 'datetime' in time_tag.attrs:
+                        job_datetime_str = time_tag['datetime']
+                    jobs_data.append({'url': job_url, 'date': job_datetime_str})
+
+    # Process initial page
+    process_job_listings(soup)
+
+    # Fetch additional pages
+    for start in start_values:
+        # Construct paginated URL with adjusted path
+        paginated_url = construct_pagination_url(multiple_jobs_url, start)
+        page_text = fetch_page_with_retry(paginated_url, multiple_jobs_headers, "job-search-card__listdate", 50)
+        if page_text:
+            # The response is expected to be HTML snippets, so we can parse it directly
+            soup = BeautifulSoup(page_text, 'html.parser')
+            process_job_listings(soup)
+        else:
+            print(f"Failed to fetch page with start={start}")
+
+    # Now we have collected all jobs from the search results
+    # Sort jobs by date if needed
+    jobs_data.sort(key=lambda x: x['date'] or datetime.min, reverse=True)
+
+    # Now limit jobs_data to num_jobs_to_scrape
+    if len(jobs_data) > num_jobs_to_scrape:
+        jobs_data = jobs_data[:num_jobs_to_scrape]
+
+    # Now, fetch job details
+
+    async def fetch_job_detail(session, url, substring, max_retries=50):
+        for _ in range(max_retries):
+            try:
+                single_job_headers = {
+                    "User-Agent": ua.random,
+                    "Accept": multiple_jobs_headers["Accept"],
+                    "Cookie": 'lang=v=2&lang=en-us;',
+                    "Upgrade-Insecure-Requests": "1"
+                }
+                async with session.get(url, headers=single_job_headers) as response:
+                    text = await response.text()
+                    if substring in text:
+                        return text
                     else:
-                        continue  # Continue to process new anchors
+                        sleep_time = random.uniform(3, 15)
+                        await asyncio.sleep(sleep_time)
+            except Exception:
+                sleep_time = random.uniform(3, 15)
+                await asyncio.sleep(sleep_time)
+        return None
 
-                for anchor in anchors_to_process:
-                    if len(total_jobs_collected) >= num_jobs_to_scrape:
-                        break
-                    parent_elem = anchor.find_element(By.XPATH, "..")
-                    driver.execute_script("arguments[0].scrollIntoView();", anchor)
-                    time.sleep(random.uniform(0.5, 1.5))  # Give time for new jobs to load
-                    job_title_xpath = f"//h2[contains(text(), '{(anchor.text).split()[0].strip()}')]"
-                    move_result = move_until_found(driver, job_title_xpath, 100, TITLE_XPATH, anchor, previous_anchor)
-                    if move_result == 'sign_in':
-                        print("Sign-in detected during job scraping, visiting random sites.")
-                        num_sites = random.randint(2, 3)
-                        for _ in range(num_sites):
-                            random_site = random.choice(POPULAR_WEBSITES)
-                            driver.get(random_site)
-                            time.sleep(random.uniform(1, 3))
-                        break  # Break out to restart the scraping loop
-                    previous_anchor = anchor
-                    click_forcefully(driver, anchor, True, TITLE_XPATH)
-                    title = anchor.text.strip()
-                    company = get_company(parent_elem, COMPANY_XPATH)
-                    location_city = get_location(driver, LOCATION_XPATH)
-                    salary = get_salary(driver, SALARY_XPATH)
-                    description = get_description(driver, DESCRIPTION_XPATH)
-                    posted_date = get_date(parent_elem, POST_DATE_XPATH)
-                    job_link = anchor.get_attribute('href')
+    async def process_job(session, job):
+        # Extract job ID from the original job URL
+        job_id_match = re.search(r'-(\d+)\?', job['url'])
+        if job_id_match:
+            job_id = job_id_match.group(1)
+        else:
+            print(f"Failed to extract job ID from URL: {job['url']}")
+            return
 
-                    job_data = {
-                        "title": title,
-                        "company_name": company,
-                        "location": location_city,
-                        "salary_range": salary,
-                        "posted_date": posted_date,
-                        "description": description,
-                        "original_url": job_link
-                    }
-                    partial_jobs_collected.append(job_data)
-                    total_jobs_collected.append(job_data)
+        # Construct the new job detail URL
+        job_detail_url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 
-                    print(f"Link: {job_link}")
-                    print(f"Title: {title}")
-                    print(f"Company: {company}")
-                    print(f"Location: {location_city}")
-                    print(f"Salary: {salary}")
-                    print(f"Description: {description}")
-                    print(f"Date: {posted_date}")
-                    print("=====================================================================")
-                    time.sleep(random.uniform(1, 3))
+        job_detail_text = await fetch_job_detail(session, job_detail_url, "top-card-layout__title", 100)
+        if job_detail_text:
+            # Parse the job detail page
+            soup = BeautifulSoup(job_detail_text, 'html.parser')
+            # Extract required data
+            # Title
+            title_tag = soup.find('h2', class_='top-card-layout__title')
+            title = title_tag.get_text(strip=True) if title_tag else None
+            # Company name
+            company_tag = soup.find('a', class_=re.compile('topcard__org-name-link'))
+            company_name = company_tag.get_text(strip=True) if company_tag else None
+            # Location
+            location_tag = soup.find('span', class_='topcard__flavor topcard__flavor--bullet')
+            location = location_tag.get_text(strip=True) if location_tag else None
+            # Salary (leave empty)
+            salary = None
+            # Description
+            description_parts = []
+            description_tag = soup.find('div', class_='description__text description__text--rich')
+            if description_tag:
+                text = description_tag.get_text(separator='\n', strip=True)
+                text = text.replace('Show more', '').replace('Show less', '').strip()
+                description_parts.append(text)
+            criteria_tag = soup.find('div', class_='description__job-criteria-list')
+            if criteria_tag:
+                text = criteria_tag.get_text(separator='\n', strip=True)
+                text = text.replace('Show more', '').replace('Show less', '').strip()
+                description_parts.append(text)
+            description = '\n'.join(description_parts) if description_parts else None
+            # Collect data
+            job['title'] = title
+            job['company_name'] = company_name
+            job['location'] = location
+            job['salary_range'] = salary
+            job['description'] = description
+            job['original_url'] = job['url']
+            # job['posted_date'] is already set from earlier
+            partial_jobs_collected.append(job)
+            total_jobs_collected.append(job)
 
-                    # Send data to Gemini when we have a batch of up to 5 jobs or when we've reached the total number
-                    if len(partial_jobs_collected) % 5 == 0 or len(total_jobs_collected) == num_jobs_to_scrape:
-                        prompt = construct_prompt(cv_data, partial_jobs_collected)
-                        gemini_response = get_gemini_response(prompt)
-                        if "```" in gemini_response:
-                            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-                        try:
-                            jobs_with_scores = json.loads(gemini_response)
-                            print("Gemini Response:")
-                            print(json.dumps(jobs_with_scores, indent=4, ensure_ascii=False))
-                            # Create jobs and job searches in the database
-                            for job_data in jobs_with_scores:
-                                job = Job.objects.create(
-                                    title=job_data['title'],
-                                    description=job_data['description'],
-                                    company_name=job_data['company_name'],
-                                    location=job_data['location'],
-                                    salary_range=job_data.get('salary_range'),
-                                    min_salary=job_data.get('min_salary'),
-                                    max_salary=job_data.get('max_salary'),
-                                    employment_type=job_data.get('employment_type', 'full-time'),
-                                    original_url=job_data['original_url'].split("?")[0],
-                                    skills_required=job_data['skills_required'],
-                                    requirements=job_data['requirements'],
-                                    benefits=job_data['benefits'],
-                                    posted_date=job_data.get('posted_date')
-                                )
+            print(f"Title: {title}")
+            print(f"Company: {company_name}")
+            print(f"Location: {location}")
+            print(f"Salary: {salary}")
+            print(f"Description: {description}")
+            print(f"Posted Date: {job['date'] if job['date'] else 'N/A'}")
+            print(f"Job URL: {job['url']}")
+            print("-" * 80)
+        else:
+            print(f"Failed to fetch job detail for URL: {job_detail_url}")
 
-                                # Create a JobSearch for this candidate and job
-                                JobSearch.objects.create(
-                                    candidate=candidate_profile['candidate'],
-                                    job=job,
-                                    similarity_score=job_data['score']
-                                )
-                                candidate.credits -= 1
-                                candidate.save()
-                        except json.JSONDecodeError as e:
-                            print(f"Error parsing Gemini response: {e}")
-                            print("Gemini response was:")
-                            print(gemini_response)
-                        # Reset jobs_collected for the next batch
-                        partial_jobs_collected = []
+    async def main(jobs_data):
+        semaphore = asyncio.Semaphore(10)
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for job in jobs_data:
+                task = asyncio.ensure_future(bound_process_job(semaphore, session, job))
+                tasks.append(task)
+            await asyncio.gather(*tasks)
 
-                if len(total_jobs_collected) >= num_jobs_to_scrape:
-                    break
+    async def bound_process_job(semaphore, session, job):
+        async with semaphore:
+            await process_job(session, job)
 
-                # Scroll to load more jobs
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(random.uniform(1, 2))
+    # Run the main function to fetch job details
+    asyncio.run(main(jobs_data))
 
-            time.sleep(10)
-            kill_chrome(driver)
-            break  # Break the infinite loop after successful execution
-        except FileNotFoundError as e:
-            print(f"Error: {e}")
-            break
-        except WebDriverException as e:
-            print(f"WebDriver error: {e}")
-            break
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            if driver:
-                kill_chrome(driver)
-            print("Restarting the scraping process...")
-            continue  # Start over again
+    # Process jobs in batches and send to Gemini
+    batch_size = 5
+    for i in range(0, len(partial_jobs_collected), batch_size):
+        jobs_batch = partial_jobs_collected[i:i+batch_size]
+        prompt = construct_prompt(cv_data, jobs_batch)
+        gemini_response = get_gemini_response(prompt)
+        if "```" in gemini_response:
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+        try:
+            jobs_with_scores = json.loads(gemini_response)
+            print("Gemini Response:")
+            print(json.dumps(jobs_with_scores, indent=4, ensure_ascii=False))
+            # Create jobs and job searches in the database
+            for job_data in jobs_with_scores:
+                # Before creating, check if job already exists
+                job_url_no_query = job_data['original_url'].split("?")[0]
+                if Job.objects.filter(original_url=job_url_no_query).exists():
+                    print(f"Job already exists in database: {job_url_no_query}")
+                    continue
+                job = Job.objects.create(
+                    title=job_data['title'],
+                    description=job_data['description'],
+                    company_name=job_data['company_name'],
+                    location=job_data['location'],
+                    salary_range=job_data.get('salary_range'),
+                    min_salary=job_data.get('min_salary'),
+                    max_salary=job_data.get('max_salary'),
+                    employment_type=job_data.get('employment_type', 'full-time'),
+                    original_url=job_url_no_query,
+                    skills_required=job_data['skills_required'],
+                    requirements=job_data['requirements'],
+                    benefits=job_data['benefits'],
+                    posted_date=job_data.get('posted_date')
+                )
+
+                # Create a JobSearch for this candidate and job
+                JobSearch.objects.create(
+                    candidate=candidate,
+                    job=job,
+                    similarity_score=job_data['score']
+                )
+                candidate.credits -= 1
+                candidate.save()
+                # notification = Notification.objects.create(
+                #     candidate=candidate,
+                #     job=job,
+                #     message=f"A new job '{job.title}' at {job.company_name} has been added to your job search."
+                # )
+                #
+                # # Send notification to WebSocket
+                # channel_layer = get_channel_layer()
+                # async_to_sync(channel_layer.group_send)(
+                #     f"notifications_{candidate.user.id}",
+                #     {
+                #         "type": "send_notification",
+                #         "message": notification.message
+                #     }
+                # )
+
+        except json.JSONDecodeError as e:
+            print(f"Error parsing Gemini response: {e}")
+            print("Gemini response was:")
+            print(gemini_response)
+
+    print("Scraping completed successfully.")

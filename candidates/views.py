@@ -964,14 +964,13 @@ class TriggerScrapingView(APIView):
         candidate = request.user.candidate  # Get the authenticated candidate
         keyword = request.data.get('keyword')  # Get keyword from request body
         location = request.data.get('location')  # Get location from request body
-        num_jobs_to_scrape = request.data.get('num_jobs_to_scrape', candidate.num_jobs_to_scrape)  # Get num_jobs_to_scrape or fallback to candidate setting
-
+        num_jobs_to_scrape = request.data.get('jobCount', candidate.num_jobs_to_scrape)  # Get num_jobs_to_scrape or fallback to candidate setting
         # Check if the required fields are provided
         if not keyword or not location:
             return Response({"error": "Keyword and location are required fields."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Trigger the scraping task manually
-        run_scraping_task(candidate_id=candidate.id, keyword=keyword, location=location, num_jobs_to_scrape=num_jobs_to_scrape, manual=True)
+        run_scraping_task(candidate_id=candidate.id, keyword=keyword, location=location, num_jobs_to_scrape=int(num_jobs_to_scrape), manual=True)
 
         return Response({"message": "Job scraping has been triggered manually."}, status=status.HTTP_200_OK)
 

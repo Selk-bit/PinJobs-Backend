@@ -27,6 +27,17 @@ class Candidate(models.Model):
         return f"{self.first_name} {self.last_name}"
 
 
+class Notification(models.Model):
+    candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE, related_name='notifications')
+    job = models.ForeignKey('Job', on_delete=models.CASCADE, related_name='notifications', null=True, blank=True)
+    message = models.TextField()
+    is_viewed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Notification for {self.candidate.user.username}: {self.message[:30]}"
+
+
 class CreditOrder(models.Model):
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE)
     credits = models.PositiveIntegerField()
