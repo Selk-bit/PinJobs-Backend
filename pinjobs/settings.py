@@ -126,6 +126,7 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
+        'OPTIONS': {'charset': 'utf8mb4'},
         'NAME': 'pinjobs',  # Replace with your database name
         'USER': 'salim',  # Replace with your database username
         'PASSWORD': 'salim',  # Replace with your database password
