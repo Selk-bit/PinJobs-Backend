@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'django_celery_results',
     'django_celery_beat',
     'corsheaders',
+    'channels'
 ]
 
 REST_FRAMEWORK = {
@@ -113,6 +114,7 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.mysql',
+#         'OPTIONS': {'charset': 'utf8mb4'},
 #         'NAME': 'pinjobs',  # Replace with your database name
 #         'USER': 'root',  # Replace with your database username
 #         'PASSWORD': '',  # Replace with your database password
@@ -198,3 +200,14 @@ EMAIL_HOST_USER = 'salim.elkellouti@etu.uae.ac.ma'
 EMAIL_HOST_PASSWORD = 'monsef2018'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+ASGI_APPLICATION = "pinjobs.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
