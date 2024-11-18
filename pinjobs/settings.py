@@ -179,7 +179,7 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Use your Redis server config
+CELERY_BROKER_URL = 'rediss://red-cstg411u0jms73ek3hs0:q0TgQSpRDJLrusS5PTEKUOIHnlWtm5kL@oregon-redis.render.com:6379'  # Use your Redis server config
 CELERY_RESULT_BACKEND = 'django-db'  # To store task results in the Django database
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
@@ -187,10 +187,10 @@ CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers.DatabaseScheduler'  # For
 CELERY_BEAT_SCHEDULE = {
     'run-scheduled-job-scraping': {
         'task': 'pinjobs.tasks.scheduled_job_scraping',
-        'schedule': crontab(minute=0),  # Run every hour
+        'schedule': crontab(minute=0),
     },
 }
-CELERY_TIMEZONE = 'GMT+1'
+CELERY_TIMEZONE = 'UTC'
 
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
