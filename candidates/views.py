@@ -970,7 +970,7 @@ class TriggerScrapingView(APIView):
             return Response({"error": "Keyword and location are required fields."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Trigger the scraping task manually
-        run_scraping_task(candidate_id=candidate.id, keyword=keyword, location=location, num_jobs_to_scrape=int(num_jobs_to_scrape), manual=True)
+        run_scraping_task.delay(candidate_id=candidate.id, keyword=keyword, location=location, num_jobs_to_scrape=int(num_jobs_to_scrape), manual=True)
 
         return Response({"message": "Job scraping has been triggered manually."}, status=status.HTTP_200_OK)
 
