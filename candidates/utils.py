@@ -601,35 +601,51 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             print(json.dumps(jobs_with_scores, indent=4, ensure_ascii=False))
             # Create jobs and job searches in the database
             for job_data in jobs_with_scores:
-                # Before creating, check if job already exists
+                # Normalize the job URL to remove query parameters
                 job_url_no_query = job_data['original_url'].split("?")[0]
-                if Job.objects.filter(original_url=job_url_no_query).exists():
-                    print(f"Job already exists in database: {job_url_no_query}")
-                    continue
-                job = Job.objects.create(
-                    title=job_data['title'],
-                    description=job_data['description'],
-                    company_name=job_data['company_name'],
-                    location=job_data['location'],
-                    salary_range=job_data.get('salary_range'),
-                    min_salary=job_data.get('min_salary'),
-                    max_salary=job_data.get('max_salary'),
-                    employment_type=job_data.get('employment_type', 'full-time'),
-                    original_url=job_url_no_query,
-                    skills_required=job_data['skills_required'],
-                    requirements=job_data['requirements'],
-                    benefits=job_data['benefits'],
-                    posted_date=job_data.get('posted_date')
-                )
 
-                # Create a JobSearch for this candidate and job
-                JobSearch.objects.create(
-                    candidate=candidate,
-                    job=job,
-                    similarity_score=job_data['score']
-                )
-                candidate.credits -= 1
-                candidate.save()
+                # Check if the job already exists
+                existing_job = Job.objects.filter(original_url=job_url_no_query).first()
+
+                if existing_job:
+                    # Check if a JobSearch exists for the authenticated candidate and the existing job
+                    if not JobSearch.objects.filter(candidate=candidate, job=existing_job).exists():
+                        # Create a JobSearch for the existing job
+                        JobSearch.objects.create(
+                            candidate=candidate,
+                            job=existing_job,
+                            similarity_score=job_data['score']
+                        )
+                        candidate.credits -= 1  # Deduct one credit for creating the JobSearch
+                        candidate.save()
+                    else:
+                        print(f"JobSearch already exists for candidate and job: {job_url_no_query}")
+                else:
+                    # Create a new job if it doesn't exist
+                    job = Job.objects.create(
+                        title=job_data['title'],
+                        description=job_data['description'],
+                        company_name=job_data['company_name'],
+                        location=job_data['location'],
+                        salary_range=job_data.get('salary_range'),
+                        min_salary=job_data.get('min_salary'),
+                        max_salary=job_data.get('max_salary'),
+                        employment_type=job_data.get('employment_type', 'full-time'),
+                        original_url=job_url_no_query,
+                        skills_required=job_data['skills_required'],
+                        requirements=job_data['requirements'],
+                        benefits=job_data['benefits'],
+                        posted_date=job_data.get('posted_date')
+                    )
+
+                    # Create a JobSearch for this candidate and job
+                    JobSearch.objects.create(
+                        candidate=candidate,
+                        job=job,
+                        similarity_score=job_data['score']
+                    )
+                    candidate.credits -= 1  # Deduct one credit for creating the JobSearch
+                    candidate.save()
                 # notification = Notification.objects.create(
                 #     candidate=candidate,
                 #     job=job,
