@@ -1,6 +1,6 @@
 from celery import shared_task
 from django.utils import timezone
-from .models import Candidate, CV, CVData
+from .models import Candidate, CV, CVData, ScrapingSettings, KeywordLocationCombination
 from .utils import scrape_jobs
 from datetime import timedelta
 from django.forms.models import model_to_dict
@@ -59,41 +59,42 @@ def get_cv_data(candidate):
 
 
 @shared_task
-def run_scraping_task(candidate_id=None, keyword=None, location=None, num_jobs_to_scrape=None, manual=False):
-    """
-    If manual is True, this is a manually triggered scraping task with keyword and location.
-    If manual is False, it is a scheduled task that should use candidate's default parameters.
-    """
-    # Get the candidate instance
-    candidate = Candidate.objects.get(id=candidate_id)
+def run_scraping_task():
 
-    # For scheduled runs, use the default candidate settings
-    if not manual:
-        keyword = candidate.cvdata.title  # Assuming CVData title is the job title to search
-        location = candidate.city
-        num_jobs_to_scrape = candidate.num_jobs_to_scrape
+    settings = ScrapingSettings.objects.first()
+    if settings.is_scraping:
+        print("Scraping task already running. Exiting.")
+        return
 
-    # Start the scraping process and mark candidate as scraping
-    if not candidate.is_scraping:
-        candidate.is_scraping = True
-        candidate.save()
-        try:
-            # Call the scrape_jobs function with the provided parameters
-            cv_data = get_cv_data(candidate)
-            candidate_data = {
-                'title': keyword,
-                'city': location,
-                'candidate': candidate
-            }
-            scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape)
+    settings.is_scraping = True
+    settings.save()
 
+    try:
+        num_jobs_to_scrape = settings.num_jobs_to_scrape
+        total_jobs_scraped = 0
 
-            # Update the candidate when scraping completes
-            candidate.last_scrape_time = timezone.now()
-        except Exception as e:
-            # Log the error or handle it appropriately
-            print(f"Error in scraping: {e}")
-        finally:
-            # Ensure we mark the scraping status as false after completion
-            candidate.is_scraping = False
-            candidate.save()
+        # Fetch unscripted combinations
+        combinations = KeywordLocationCombination.objects.filter(is_scraped=False)
+
+        for combination in combinations:
+
+            keyword = combination.keyword.keyword
+            location = combination.location.location
+
+            jobs_collected = scrape_jobs(keyword, location, num_jobs_to_scrape - total_jobs_scraped)
+            total_jobs_scraped += len(jobs_collected)
+
+            # Mark the combination as scraped if all jobs fetched
+            if not jobs_collected or len(jobs_collected) < num_jobs_to_scrape:
+                combination.is_scraped = True
+                combination.save()
+
+            if total_jobs_scraped >= num_jobs_to_scrape:
+                break
+
+    except Exception as e:
+        print(f"Error during scraping task: {e}")
+    finally:
+        # Ensure the is_scraping flag is reset
+        settings.is_scraping = False
+        settings.save()

@@ -32,7 +32,7 @@ SECRET_KEY = 'django-insecure-2xcxt#4wfn87%_9(1$^3w@(7+ynt*9_9(f(%2tvdcoai97$q&u
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["pinjobs-backend.onrender.com", "127.0.0.1"]
+ALLOWED_HOSTS = ["pinjobs-backend.onrender.com", "127.0.0.1", ]
 
 
 # Application definition
@@ -50,7 +50,8 @@ INSTALLED_APPS = [
     'django_celery_results',
     'django_celery_beat',
     'corsheaders',
-    'channels'
+    'channels',
+    'drf_yasg',
 ]
 
 REST_FRAMEWORK = {
@@ -211,4 +212,16 @@ CHANNEL_LAYERS = {
             "hosts": [("127.0.0.1", 6379)],
         },
     },
+}
+
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'description': 'JWT Authorization header using the Bearer scheme. Example: "Authorization: Bearer {token}"',
+            'name': 'Authorization',
+            'in': 'header',
+        }
+    },
+    'USE_SESSION_AUTH': False,
 }

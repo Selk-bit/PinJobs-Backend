@@ -1,7 +1,8 @@
 from rest_framework import viewsets
-from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele, CreditOrder
+from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele, CreditOrder,
+                     Pack, Price, Favorite)
 from .serializers import (CandidateSerializer, CVSerializer, CVDataSerializer, JobSerializer, JobSearchSerializer,
-                          PaymentSerializer, CreditPurchaseSerializer, TemplateSerializer)
+                          PaymentSerializer, CreditPurchaseSerializer, TemplateSerializer, PackSerializer)
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,7 +15,8 @@ import requests
 from django.core.files.storage import default_storage
 from django.conf import settings
 import os
-from .utils import get_gemini_response
+from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
+                    construct_similarity_prompt)
 import json
 from .tasks import run_scraping_task
 from django.contrib.auth import authenticate
@@ -26,9 +28,15 @@ import django_filters
 from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
 from datetime import datetime
-from .utils import paypal_client, PRICE_TABLE
+from .utils import (paypal_client, is_valid_job_url, fetch_job_description, construct_tailored_job_prompt,
+                    construct_single_job_prompt, construct_candidate_profile, extract_job_id)
 from paypalcheckoutsdk.orders import OrdersCreateRequest, OrdersCaptureRequest
 from django.db import transaction
+from rest_framework.generics import ListAPIView
+from django_filters.rest_framework import DjangoFilterBackend
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 
 
 class CandidateViewSet(viewsets.ModelViewSet):
@@ -167,6 +175,7 @@ class JobFilter(django_filters.FilterSet):
             Q(benefits__icontains=value)
         )
 
+
 class CandidateJobsView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -185,38 +194,17 @@ class CandidateJobsView(APIView):
         job_filter = JobFilter(filters, queryset=Job.objects.all())
         jobs = job_filter.qs
 
-        # Apply additional filtering on JobSearch for the current candidate
+        # Get all JobSearches for the candidate
         job_searches = JobSearch.objects.filter(candidate=candidate)
+        job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
 
-        # Merge job data with the related job search
+        # Serialize jobs with similarity score
         results = []
         for job in jobs:
-            try:
-                # Find the JobSearch for the specific job and candidate
-                job_search = job_searches.get(job=job)
-
-                # Serialize the job and job search data
-                job_data = JobSerializer(job).data
-                job_data['job_search'] = JobSearchSerializer(job_search).data
-
-                results.append(job_data)
-            except JobSearch.DoesNotExist:
-                continue  # Skip jobs that don't have a JobSearch for the candidate
-
-        # Sorting logic: sort by similarity score or posted date
-        sort_by = request.query_params.get('sort_by', 'similarity_score')
-        print(sort_by)
-        if sort_by == 'posted_date':
-            # Sort by posted_date if it exists, otherwise by similarity_score
-            results.sort(
-                key=lambda x: (
-                    x['posted_date'] is None,  # False if posted_date is not None
-                    x['posted_date'] or x['job_search']['similarity_score'],
-                ),
-                reverse=True
-            )
-        else:  # Default sorting by similarity score
-            results = sorted(results, key=lambda x: x['job_search']['similarity_score'], reverse=True)
+            job_data = JobSerializer(job).data
+            # Add similarity score if the candidate has a JobSearch for the job
+            job_data['similarity_score'] = job_search_map.get(job.id, None)
+            results.append(job_data)
 
         # Apply pagination
         paginator = self.CustomPagination()
@@ -225,50 +213,84 @@ class CandidateJobsView(APIView):
         return paginator.get_paginated_response(paginated_results)
 
 
-
-class DeleteJobSearchView(APIView):
+class CandidateFavoriteJobsView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def delete(self, request, job_id):
+    class CustomPagination(PageNumberPagination):
+        page_size = 5
+        page_size_query_param = 'page_size'
+        max_page_size = 100
+
+    @swagger_auto_schema(
+        operation_description="Get the list of favorite jobs for the authenticated candidate.",
+        manual_parameters=[
+            openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
+            openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of items per page", type=openapi.TYPE_INTEGER),
+        ],
+        responses={200: JobSerializer(many=True)}
+    )
+    def get(self, request):
+        # Get the authenticated candidate
         candidate = request.user.candidate
 
-        try:
-            # Fetch the JobSearch that belongs to the candidate and includes the job
-            job_search = get_object_or_404(JobSearch, candidate=candidate, job__id=job_id)
+        # Get favorite jobs for the candidate
+        favorite_jobs = Favorite.objects.filter(candidate=candidate).select_related('job')
+        jobs = [fav.job for fav in favorite_jobs]
 
-            # Delete the JobSearch
-            job_search.delete()
+        # Get all JobSearches for the candidate
+        job_searches = JobSearch.objects.filter(candidate=candidate)
+        job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
 
-            return Response({"detail": "JobSearch deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-        except JobSearch.DoesNotExist:
-            return Response({"detail": "JobSearch not found for this candidate."}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        # Serialize jobs with similarity score
+        results = []
+        for job in jobs:
+            job_data = JobSerializer(job).data
+            # Add similarity score if the candidate has a JobSearch for the job
+            job_data['similarity_score'] = job_search_map.get(job.id, None)
+            results.append(job_data)
+
+        # Apply pagination
+        paginator = self.CustomPagination()
+        paginated_results = paginator.paginate_queryset(results, request)
+
+        return paginator.get_paginated_response(paginated_results)
 
 
-class UpdateJobSearchStatusView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, job_id):
+    @swagger_auto_schema(
+        operation_description="Add a job to the candidate's favorites.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['job_id'],
+            properties={
+                'job_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID of the job to favorite'),
+            },
+        ),
+        responses={
+            201: openapi.Response(description='Job added to favorites.'),
+            200: openapi.Response(description='Job is already in favorites.'),
+            400: openapi.Response(description='Bad request.'),
+            404: openapi.Response(description='Job not found.'),
+        },
+    )
+    def post(self, request):
         candidate = request.user.candidate
+        job_id = request.data.get('job_id')
 
-        try:
-            # Fetch the job search that belongs to the candidate and includes the job
-            job_search = get_object_or_404(JobSearch, candidate=candidate, job__id=job_id)
+        if not job_id:
+            return Response({"error": "Job ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Update the job search status from 'matched' to 'applied'
-            if job_search.status == 'matched':
-                job_search.status = 'applied'
-                job_search.save()
+        job = Job.objects.filter(id=job_id).first()
+        if not job:
+            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
 
-                return Response({"detail": "Job search status updated to 'applied'."}, status=status.HTTP_200_OK)
-            else:
-                return Response({"detail": "Job search is already 'applied'."}, status=status.HTTP_400_BAD_REQUEST)
+        if candidate.favorites.count() >= 10:
+            return Response({"error": "You can only add up to 10 favorite jobs."}, status=status.HTTP_400_BAD_REQUEST)
 
-        except JobSearch.DoesNotExist:
-            return Response({"detail": "Job search not found for this candidate."}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        favorite, created = Favorite.objects.get_or_create(candidate=candidate, job=job)
+        if created:
+            return Response({"detail": "Job added to favorites."}, status=status.HTTP_201_CREATED)
+        else:
+            return Response({"detail": "Job is already in favorites."}, status=status.HTTP_200_OK)
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -296,6 +318,27 @@ class CreditPurchaseViewSet(viewsets.ModelViewSet):
 class SignUpView(APIView):
     permission_classes = [AllowAny]
 
+    @swagger_auto_schema(
+        operation_description="Register a new user and create a candidate profile.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['username', 'password'],
+            properties={
+                'username': openapi.Schema(type=openapi.TYPE_STRING, description='Username for the new user'),
+                'password': openapi.Schema(type=openapi.TYPE_STRING, description='Password for the new user'),
+                'email': openapi.Schema(type=openapi.TYPE_STRING, description='Email address'),
+                'first_name': openapi.Schema(type=openapi.TYPE_STRING, description='First name'),
+                'last_name': openapi.Schema(type=openapi.TYPE_STRING, description='Last name'),
+                'phone': openapi.Schema(type=openapi.TYPE_STRING, description='Phone number'),
+                'age': openapi.Schema(type=openapi.TYPE_INTEGER, description='Age'),
+                'city': openapi.Schema(type=openapi.TYPE_STRING, description='City'),
+            },
+        ),
+        responses={
+            201: CandidateSerializer(),
+            400: openapi.Response(description='Bad Request')
+        }
+    )
     def post(self, request):
         data = request.data
         try:
@@ -321,9 +364,34 @@ class SignUpView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
+    @swagger_auto_schema(
+        operation_description="Authenticate a user and return JWT tokens.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['identifier', 'password'],
+            properties={
+                'identifier': openapi.Schema(type=openapi.TYPE_STRING, description='Username or email'),
+                'password': openapi.Schema(type=openapi.TYPE_STRING, description='Password'),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description='Login successful',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'refresh': openapi.Schema(type=openapi.TYPE_STRING, description='Refresh token'),
+                        'access': openapi.Schema(type=openapi.TYPE_STRING, description='Access token'),
+                    }
+                )
+            ),
+            401: openapi.Response(description='Invalid credentials'),
+        }
+    )
     def post(self, request):
         identifier = request.data.get('identifier')
         password = request.data.get('password')
@@ -362,6 +430,20 @@ class LoginView(APIView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Logout the authenticated user by blacklisting the token.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['access'],
+            properties={
+                'access': openapi.Schema(type=openapi.TYPE_STRING, description='Access token to blacklist'),
+            },
+        ),
+        responses={
+            205: openapi.Response(description='Successfully logged out'),
+            400: openapi.Response(description='Bad Request'),
+        }
+    )
     def post(self, request):
         try:
             # Get the access token from the request
@@ -379,35 +461,45 @@ class LogoutView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class CurrentUserView(APIView):
+class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Retrieve the authenticated user's profile.",
+        responses={200: CandidateSerializer()}
+    )
     def get(self, request):
+        # Retrieve current user profile
         user = request.user
-        candidate = Candidate.objects.get(user=user)
-        candidate_data = CandidateSerializer(candidate).data
+        candidate = get_object_or_404(Candidate, user=user)
+        serializer = CandidateSerializer(candidate)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-        return Response(candidate_data, status=status.HTTP_200_OK)
+    @swagger_auto_schema(
+        operation_description="Update the authenticated user's profile.",
+        request_body=CandidateSerializer,
+        responses={200: CandidateSerializer(), 400: openapi.Response(description='Bad Request')}
+    )
+    def put(self, request):
+        # Update current user profile
+        user = request.user
+        candidate = get_object_or_404(Candidate, user=user)
+        serializer = CandidateSerializer(candidate, data=request.data, partial=False)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-class UpdateCandidateView(APIView):
-    permission_classes = [IsAuthenticated]
-
+    @swagger_auto_schema(
+        operation_description="Partially update the authenticated user's profile.",
+        request_body=CandidateSerializer,
+        responses={200: CandidateSerializer(), 400: openapi.Response(description='Bad Request')}
+    )
     def patch(self, request):
-        # Extract the current user's candidate instance
-        candidate = get_object_or_404(Candidate, user=request.user)
-
-        # Allowed fields for updating
-        allowed_fields = [
-            'first_name', 'last_name', 'phone', 'age', 'city', 'country',
-            'num_jobs_to_scrape', 'scrape_interval', 'scrape_unit'
-        ]
-
-        # Only update fields that are present in the request data and allowed
-        update_data = {key: value for key, value in request.data.items() if key in allowed_fields}
-
-        serializer = CandidateSerializer(candidate, data=update_data, partial=True)
-
+        # Partially update current user profile
+        user = request.user
+        candidate = get_object_or_404(Candidate, user=user)
+        serializer = CandidateSerializer(candidate, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -417,6 +509,22 @@ class UpdateCandidateView(APIView):
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Change the authenticated user's password.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['old_password', 'new_password', 'confirm_password'],
+            properties={
+                'old_password': openapi.Schema(type=openapi.TYPE_STRING, description='Current password'),
+                'new_password': openapi.Schema(type=openapi.TYPE_STRING, description='New password'),
+                'confirm_password': openapi.Schema(type=openapi.TYPE_STRING, description='Confirm new password'),
+            },
+        ),
+        responses={
+            200: openapi.Response(description='Password updated successfully'),
+            400: openapi.Response(description='Bad Request'),
+        }
+    )
     def post(self, request):
         user = request.user
         old_password = request.data.get('old_password')
@@ -443,22 +551,109 @@ class ChangePasswordView(APIView):
 class CVDataView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Retrieve the CV data for the authenticated user.",
+        responses={200: CVDataSerializer()}
+    )
     def get(self, request):
         # Get the authenticated candidate
         candidate = request.user.candidate
 
-        # Retrieve the CVData for the candidate
+        # Retrieve the CVData for the candidate's base CV
         try:
-            cv_data = CVData.objects.get(cv__candidate=candidate)
+            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+            cv_data = base_cv.cv_data  # Access the related CVData
             serializer = CVDataSerializer(cv_data)
             return Response(serializer.data, status=status.HTTP_200_OK)
+        except CV.DoesNotExist:
+            return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
         except CVData.DoesNotExist:
-            return Response({"error": "CVData not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "CVData not found for the base CV"}, status=status.HTTP_404_NOT_FOUND)
+
+    @swagger_auto_schema(
+        operation_description="Update or create the CV data for the authenticated user.",
+        request_body=CVDataSerializer,
+        responses={200: CVDataSerializer(), 400: openapi.Response(description='Bad Request')}
+    )
+    def put(self, request):
+        # Update or create CV data
+        candidate = request.user.candidate
+        cv, _ = CV.objects.get_or_create(candidate=candidate, cv_type=CV.BASE)
+        cv_data, _ = CVData.objects.get_or_create(cv=cv)
+        serializer = CVDataSerializer(cv_data, data=request.data, partial=False)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @swagger_auto_schema(
+        operation_description="Partially update the CV data for the authenticated user.",
+        request_body=CVDataSerializer,
+        responses={200: CVDataSerializer(), 400: openapi.Response(description='Bad Request')}
+    )
+    def patch(self, request):
+        # Partially update CV data
+        candidate = request.user.candidate
+        cv, _ = CV.objects.get_or_create(candidate=candidate, cv_type=CV.BASE)
+        cv_data, _ = CVData.objects.get_or_create(cv=cv)
+        serializer = CVDataSerializer(cv_data, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @swagger_auto_schema(
+        operation_description="Delete the CV data for the authenticated user's base CV.",
+        responses={204: openapi.Response(description="No Content"), 404: openapi.Response(description="Not Found")}
+    )
+    def delete(self, request):
+        # Delete CV data
+        candidate = request.user.candidate
+        try:
+            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+            cv_data = base_cv.cv_data
+            cv_data.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except CV.DoesNotExist:
+            return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
+        except CVData.DoesNotExist:
+            return Response({"error": "CVData not found for the base CV"}, status=status.HTTP_404_NOT_FOUND)
+
+    @swagger_auto_schema(
+        operation_description="Delete the current CV data for the authenticated user's base CV and create a new one.",
+        request_body=CVDataSerializer,
+        responses={201: CVDataSerializer(), 400: openapi.Response(description="Bad Request")}
+    )
+    def post(self, request):
+        # Delete and recreate CV data
+        candidate = request.user.candidate
+        try:
+            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+            # Delete existing CVData
+            if hasattr(base_cv, 'cv_data'):
+                base_cv.cv_data.delete()
+
+            # Create new CVData
+            new_cv_data = CVData(cv=base_cv)
+            serializer = CVDataSerializer(new_cv_data, data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except CV.DoesNotExist:
+            return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
 
 
 class DeleteCVView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Delete a CV belonging to the authenticated user.",
+        responses={
+            204: openapi.Response(description='CV deleted successfully'),
+            404: openapi.Response(description='CV not found or does not belong to the authenticated user'),
+        }
+    )
     def delete(self, request, cv_id):
         # Get the authenticated candidate
         candidate = request.user.candidate
@@ -483,7 +678,7 @@ class DeleteCVView(APIView):
                     modele.delete()
                 template.delete()
 
-            return Response({"detail": "CV, associated CVData, Template, and Modele deleted successfully"},
+            return Response({"detail": "CV deleted successfully"},
                             status=status.HTTP_204_NO_CONTENT)
 
         except CV.DoesNotExist:
@@ -494,6 +689,16 @@ class DeleteCVView(APIView):
 class UpdateOrCreateCVDataView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Update or create CV data for a specific CV.",
+        request_body=CVDataSerializer,
+        responses={
+            200: CVDataSerializer(),
+            201: CVDataSerializer(),
+            400: openapi.Response(description='Bad Request'),
+            404: openapi.Response(description='CV not found.')
+        }
+    )
     def post(self, request):
         # Retrieve or create the CV based on `cv_id`
         cv_id = request.data.get("cv_id")
@@ -526,12 +731,36 @@ class UpdateOrCreateCVDataView(APIView):
 
 class UploadCVView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser]  # The view expects multipart/form-data
 
+    @swagger_auto_schema(
+        operation_description="Upload a CV file to extract data and create/update the CV data.",
+        manual_parameters=[
+            openapi.Parameter(
+                'files',  # This should match the key used in request.FILES
+                openapi.IN_FORM,
+                description="CV file to upload",
+                type=openapi.TYPE_FILE,
+                required=True,
+            ),
+        ],
+        responses={
+            201: CVDataSerializer(),
+            400: openapi.Response(description='Please upload exactly one file.'),
+            403: openapi.Response(description='Insufficient credits.'),
+            500: openapi.Response(description='Failed to extract data from the external API.')
+        },
+        consumes=["multipart/form-data"],
+    )
     def post(self, request):
         # Check if the candidate has enough credits
         candidate = request.user.candidate
-        if candidate.credits <= 0:
-            return Response({'error': 'No credits available. Please purchase more credits.'}, status=status.HTTP_403_FORBIDDEN)
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'upload_cv')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         # Ensure exactly one file is provided
         if 'files' not in request.FILES or len(request.FILES.getlist('files')) != 1:
@@ -549,9 +778,9 @@ class UploadCVView(APIView):
             extracted_data = response.json()  # Get the extracted data from the external API
 
             # If the user already has a CV, delete the existing CV and CVData
-            if CV.objects.filter(candidate=candidate).exists():
-                existing_cv = CV.objects.get(candidate=candidate)
-                existing_cv.cv_data.all().delete()  # Use the related_name 'cv_data' to delete associated CVData
+            if CV.objects.filter(candidate=candidate, cv_type=CV.BASE).exists():
+                existing_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+                # existing_cv.cv_data.all().delete()
                 existing_cv.delete()  # Delete the existing CV
 
             # Save the file in the 'Cvs' folder after successful data extraction
@@ -595,8 +824,7 @@ class UploadCVView(APIView):
                 serialized_data.pop('cv', None)
                 # response_data.append(serialized_data)
 
-                candidate.credits -= 1
-                candidate.save()
+                deduct_credits(candidate, 'upload_cv')
 
                 # Respond with the created CVData excluding "id" and "cv" fields
                 return Response(serialized_data, status=status.HTTP_201_CREATED)
@@ -609,7 +837,24 @@ class UploadCVView(APIView):
 
 class LinkedInCVView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser]
 
+    @swagger_auto_schema(
+        operation_description="Fetch LinkedIn profile data and create/update the CV data.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['linkedin_profile_url'],
+            properties={
+                'linkedin_profile_url': openapi.Schema(type=openapi.TYPE_STRING, description='LinkedIn profile URL'),
+            },
+        ),
+        responses={
+            201: CVDataSerializer(),
+            400: openapi.Response(description='Invalid LinkedIn profile URL.'),
+            403: openapi.Response(description='Insufficient credits.'),
+            500: openapi.Response(description='Failed to fetch LinkedIn profile data.')
+        }
+    )
     def post(self, request):
         linkedin_url = request.data.get('linkedin_profile_url')
 
@@ -619,8 +864,12 @@ class LinkedInCVView(APIView):
 
         # Check if candidate has credits
         candidate = request.user.candidate
-        if candidate.credits <= 0:
-            return Response({'error': 'No credits available. Please purchase more credits.'}, status=status.HTTP_403_FORBIDDEN)
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'upload_linkedin_profile')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         # Call ProxyCurl API to fetch LinkedIn profile data
         headers = {
@@ -645,9 +894,9 @@ class LinkedInCVView(APIView):
             # profile_data = {'public_identifier': 'salim-elkellouti', 'profile_pic_url': 'https://media.licdn.com/dms/image/v2/D4E03AQGBSM0moSSvXA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1687307448266?e=1733961600&v=beta&t=LnunByFqil0RxnpyhBwwiPtFvV6tGbgh9ByJKJXBncc', 'background_cover_image_url': 'https://media.licdn.com/dms/image/v2/D4E16AQEyZkfW28eAwQ/profile-displaybackgroundimage-shrink_350_1400/profile-displaybackgroundimage-shrink_350_1400/0/1721421996986?e=1733961600&v=beta&t=PTWCJdCzpniZfxSVINJbWc9KkmYWoqpurR9UoJGn2bc', 'first_name': 'Salim', 'last_name': 'Elkellouti', 'full_name': 'Salim Elkellouti', 'follower_count': 154, 'occupation': 'Software Developer at GEEKFACT', 'headline': 'Développeur de logiciels chez GEEKFACT | Master en Systèmes Informatiques et Mobiles', 'summary': 'I am Salim El Kellouti, a dedicated software developer looking for new opportunities.\n\nI hold a Bachelor\'s degree in Computer Engineering and a Master\'s degree in Computer and Mobile Systems from the "Faculté des Sciences et Techniques de Tanger". My academic background laid a solid foundation in the principles of computer science, mathematics, and software engineering, which I\'ve applied effectively throughout my career.\n\nHaving developed my technical expertise through a series of complex projects and internships during my studies, I have a strong grasp of various programming languages and frameworks, including Python, PHP, Flask, Laravel, and Django. While I have substantial experience as a full-stack developer, my passion lies in backend development where I excel at designing and implementing robust and scalable server-side logic.\nMy career goals are centered around deepening my knowledge and expertise in backend architecture to contribute to more efficient and innovative software solutions. I aim to pursue opportunities that challenge me to utilize my skills in creating impactful and enduring technological advancements.', 'country': 'MA', 'country_full_name': 'Morocco', 'city': 'Tanger-Tetouan-Al Hoceima', 'state': None, 'experiences': [{'starts_at': {'day': 1, 'month': 7, 'year': 2024}, 'ends_at': None, 'company': 'GEEKFACT', 'company_linkedin_profile_url': 'https://www.linkedin.com/company/geekfact', 'company_facebook_profile_url': None, 'title': 'Software Developer', 'description': None, 'location': 'Casablanca, Casablanca-Settat, Maroc', 'logo_url': 'https://s3.us-west-000.backblazeb2.com/proxycurl/company/geekfact/profile?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=0004d7f56a0400b0000000001%2F20241009%2Fus-west-000%2Fs3%2Faws4_request&X-Amz-Date=20241009T211240Z&X-Amz-Expires=1800&X-Amz-SignedHeaders=host&X-Amz-Signature=0fe11923fb4bdb0e5ece40ceb981d930efab28e210769c519152fc46c5a3a7c5'}, {'starts_at': {'day': 1, 'month': 3, 'year': 2024}, 'ends_at': {'day': 31, 'month': 7, 'year': 2024}, 'company': 'CAMELDEV', 'company_linkedin_profile_url': None, 'company_facebook_profile_url': None, 'title': 'Full-Stack Web and Mobile Developer: Flutter | Django | MySQL', 'description': '-Developing a real estate application using Django and Flutter for posting and searching properties.\n-Implementing advanced search functionality with thorough filters.\n-Integrating AI to convert multi-language descriptions of searched properties into queries, utilizing Celery and Celery Beat for regular updates.\n-Implementing GPS-based alerts to notify users and property owners of proximity to properties.\n-Administering the Django backend to efficiently manage REST APIs while handling media storage on AWS S3 Buckets.\n-Enriching data using Python scrapers configured as AWS Lambda functions.', 'location': 'Tanger-Tétouan-Al Hoceïma, Maroc', 'logo_url': None}, {'starts_at': {'day': 1, 'month': 6, 'year': 2022}, 'ends_at': {'day': 29, 'month': 2, 'year': 2024}, 'company': 'HENNA MEDIA LTD', 'company_linkedin_profile_url': 'https://www.linkedin.com/company/17742480/', 'company_facebook_profile_url': None, 'title': 'Full-Stack Developer: Laravel | Django | MySQL | PostgreSQL', 'description': '-Enhanced backend functionalities using Laravel and MySQL for improved data management and user interaction handling.\n-Implemented responsive templating with Laravel Blade and developed custom JavaScript for dynamic and interactive content delivery.\n-Developed backend systems with Laravel and MySQL to support dynamic content delivery, employing AJAX and vanilla JavaScript to enhance system responsiveness and performance.\n-Created a management dashboard using Laravel, MySQL, and Laravel Blade for handling complex transactions and real-time inventory management.\n-Integrated comprehensive security features including secure logins and role-based access controls to ensure data protection.\n-Developed secure user authentication and member management systems using Laravel and MySQL.\nImplemented multi-factor authentication and session management to enhance security and user interface interactivity using Laravel Blade.', 'location': 'Tanger-Tétouan-Al Hoceïma, Maroc', 'logo_url': None}, {'starts_at': {'day': 1, 'month': 6, 'year': 2021}, 'ends_at': {'day': 31, 'month': 5, 'year': 2022}, 'company': 'Chakir Group', 'company_linkedin_profile_url': None, 'company_facebook_profile_url': None, 'title': 'Python Developer: Python | Selenium | Flask | FasAPI', 'description': '-Engineered advanced web scrapers using Python, employing libraries such as Selenium for automation of web browsers, BeautifulSoup for parsing HTML and XML documents, and Requests for handling HTTP requests. This approach enabled efficient data extraction from various web sources, tailored to specific project requirements.\n\n-Designed and implemented a RESTful API using Flask to facilitate the reception and storage of data extracted by the scrapers. Structured the API to handle requests efficiently, ensuring robust data management through systematic validation, serialization, and storage in a relational database, enhancing data integrity and accessibility.', 'location': None, 'logo_url': None}, {'starts_at': {'day': 1, 'month': 4, 'year': 2020}, 'ends_at': {'day': 30, 'month': 6, 'year': 2020}, 'company': 'Faculté des Sciences et Techniques de Tanger', 'company_linkedin_profile_url': 'https://www.linkedin.com/company/fsttanger', 'company_facebook_profile_url': None, 'title': ' Full-stack Developer intern : Laravel | React | MySQL', 'description': "As part of our final year project to obtain our bachelor's degree, we completed an internal internship supervised by one of our professors, focusing on the development of a centralized web application for patient medical records.\nThe objective of this project was to provide a reliable web-based healthcare system, improve services offered to doctors and patients, and make patients' medical histories available online and accessible everywhere so that doctors can manage cases with less effort.\nWe utilized several technologies for this project, with the most essential being Laravel for managing registration, authentication, and routing at the Back-End, and React.js for the Front-End of our application.", 'location': None, 'logo_url': 'https://s3.us-west-000.backblazeb2.com/proxycurl/company/fsttanger/profile?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=0004d7f56a0400b0000000001%2F20241009%2Fus-west-000%2Fs3%2Faws4_request&X-Amz-Date=20241009T211240Z&X-Amz-Expires=1800&X-Amz-SignedHeaders=host&X-Amz-Signature=bdf22c60f7d26a16bf390642817285941e716e8d576aef94ac04c50537ba133c'}], 'education': [{'starts_at': {'day': 1, 'month': 9, 'year': 2021}, 'ends_at': {'day': 31, 'month': 7, 'year': 2024}, 'field_of_study': 'Systèmes Informatiques et Mobiles', 'degree_name': 'Master', 'school': 'Faculty of Science and Technology Tangier', 'school_linkedin_profile_url': 'https://www.linkedin.com/company/fsttanger', 'school_facebook_profile_url': None, 'description': "Pour mon PFE de master en Systèmes Informatiques et Mobiles, j'ai développé une application immobilière utilisant Django et Flutter. L'application propose des annonces immobilières mises à jour par web scraping à partir de sites immobiliers marocains, tout en hébergeant images et vidéos sur AWS S3 et en exécutant les scripts de scraping via AWS Lambda. Elle exploite l'IA pour améliorer la fonctionnalité de recherche, élargissant dynamiquement les recherches avec un dictionnaire de synonymes spécifique au secteur immobilier et convertissant les descriptions textuelles directement en requêtes SQL pour des résultats plus précis. De plus, l'application intègre Google Maps pour les notifications basées sur la proximité et utilise Gmail SMTP pour communiquer directement avec les utilisateurs, démontrant une intégration fluide de diverses technologies pour améliorer l'expérience utilisateur.", 'logo_url': 'https://s3.us-west-000.backblazeb2.com/proxycurl/company/fsttanger/profile?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=0004d7f56a0400b0000000001%2F20241009%2Fus-west-000%2Fs3%2Faws4_request&X-Amz-Date=20241009T211240Z&X-Amz-Expires=1800&X-Amz-SignedHeaders=host&X-Amz-Signature=bdf22c60f7d26a16bf390642817285941e716e8d576aef94ac04c50537ba133c', 'grade': None, 'activities_and_societies': None}, {'starts_at': {'day': 1, 'month': 1, 'year': 2019}, 'ends_at': {'day': 31, 'month': 12, 'year': 2020}, 'field_of_study': 'Génie informatique', 'degree_name': 'Licence', 'school': 'Faculty of Science and Technology Tangier', 'school_linkedin_profile_url': 'https://www.linkedin.com/company/fsttanger', 'school_facebook_profile_url': None, 'description': "Dans le cadre de notre projet de fin d'étude, nous avons effectué un stage interne, encadré par l'un de nos professeurs, travaillant sur le sujet du développement d'une application web centralisés des dossiers médicaux des patients.\nLe but de ce travail était la fournissage d'un système Web de santé fiable, l'amélioration des services fournis aux médecins et patients, en rendant l'historique médicale de ce dernier disponible en ligne, et partout pour que les médecins puissent suivre les cas avec moins d'effort. \nNous avons utilisé plusieurs technologies pour realiser ce projet, mais les plus essentiels sont, Laravel, afin de gérer l'enregistrement, l'authentification et le routage au niveau Back-End, et Reactjs pour le Front-End de notre application.", 'logo_url': 'https://s3.us-west-000.backblazeb2.com/proxycurl/company/fsttanger/profile?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=0004d7f56a0400b0000000001%2F20241009%2Fus-west-000%2Fs3%2Faws4_request&X-Amz-Date=20241009T211240Z&X-Amz-Expires=1800&X-Amz-SignedHeaders=host&X-Amz-Signature=bdf22c60f7d26a16bf390642817285941e716e8d576aef94ac04c50537ba133c', 'grade': None, 'activities_and_societies': None}, {'starts_at': {'day': 1, 'month': 1, 'year': 2016}, 'ends_at': {'day': 31, 'month': 12, 'year': 2019}, 'field_of_study': 'MATHÉMATIQUES-INFORMATIQUE-PHYSIQUE-CHIMIE', 'degree_name': "Diplôme d'études universitaires scientifiques et techniques (DEUST)", 'school': 'Faculty of Science and Technology Tangier', 'school_linkedin_profile_url': 'https://www.linkedin.com/company/fsttanger', 'school_facebook_profile_url': None, 'description': None, 'logo_url': 'https://s3.us-west-000.backblazeb2.com/proxycurl/company/fsttanger/profile?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=0004d7f56a0400b0000000001%2F20241009%2Fus-west-000%2Fs3%2Faws4_request&X-Amz-Date=20241009T211240Z&X-Amz-Expires=1800&X-Amz-SignedHeaders=host&X-Amz-Signature=bdf22c60f7d26a16bf390642817285941e716e8d576aef94ac04c50537ba133c', 'grade': None, 'activities_and_societies': None}], 'languages': [], 'languages_and_proficiencies': [], 'accomplishment_organisations': [], 'accomplishment_publications': [], 'accomplishment_honors_awards': [], 'accomplishment_patents': [], 'accomplishment_courses': [], 'accomplishment_projects': [], 'accomplishment_test_scores': [], 'volunteer_work': [], 'certifications': [], 'connections': 154, 'people_also_viewed': [], 'recommendations': [], 'activities': [], 'similarly_named_profiles': [], 'articles': [], 'groups': [], 'skills': ['Amazon RDS', 'Beautiful Soup', 'Docker', 'Flutter', 'Celery', 'Selenium', 'AWS', 'Flask', 'Fast Api', 'Datalife', 'MariaDB', 'PostgreSQL', 'Amazon Web Services', 'AWS Lambda', 'Django', 'Framework Django REST', 'React.js', 'Laravel', 'MySQL', 'jQuery', 'SQL', 'Git', 'MongoDB', 'NoSQL', 'Vue.js', 'Python (langage de programmation)', 'C', 'WordPress', 'JavaScript', 'Java', 'Firebase', 'API Postman', 'Langage de modélisation unifié (UML)'], 'inferred_salary': {'min': None, 'max': None}, 'gender': None, 'birth_date': None, 'industry': 'Computer Software', 'extra': {'github_profile_id': None, 'twitter_profile_id': None, 'facebook_profile_id': None}, 'interests': [], 'personal_emails': [], 'personal_numbers': []}
 
             # If the candidate has an existing CV, delete it and its associated CVData
-            if CV.objects.filter(candidate=candidate).exists():
-                existing_cv = CV.objects.get(candidate=candidate)
-                existing_cv.cv_data.all().delete()
+            if CV.objects.filter(candidate=candidate, cv_type=CV.BASE).exists():
+                existing_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+                # existing_cv.cv_data.all().delete()
                 existing_cv.delete()
 
             # Extract personal emails and numbers, handling empty lists
@@ -730,8 +979,7 @@ class LinkedInCVView(APIView):
             )
 
             # Deduct one credit from the candidate
-            candidate.credits -= 1
-            candidate.save()
+            deduct_credits(candidate, 'upload_linkedin_profile')
 
             # Serialize and return the CVData response
             serialized_data = CVDataSerializer(cv_data).data
@@ -740,12 +988,266 @@ class LinkedInCVView(APIView):
 
             return Response(serialized_data, status=status.HTTP_201_CREATED)
         else:
-            return Response({'error': 'Failed to fetch LinkedIn profile data.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': 'Failed to fetch LinkedIn profile data. Try Again Later'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class JobLinkCVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Tailor a CV based on a job link.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['job_link'],
+            properties={
+                'job_link': openapi.Schema(type=openapi.TYPE_STRING, description='URL of the job posting'),
+            },
+        ),
+        responses={
+            200: CVDataSerializer(),
+            400: openapi.Response(description='Invalid job link or unsupported domain.'),
+            403: openapi.Response(description='Insufficient credits.'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
+    def post(self, request):
+        job_link = request.data.get('job_link')
+
+        # Validate the job link
+        if not job_link:
+            return Response({'error': 'Job link is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not is_valid_job_url(job_link):
+            return Response({'error': 'Invalid job link or unsupported domain.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch the job description
+        job_description = fetch_job_description(job_link)
+        if not job_description:
+            return Response({'error': 'Failed to fetch job description after multiple retries.'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Check candidate credits
+        candidate = request.user.candidate
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_job_from_link')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Extract job ID
+        job_id = extract_job_id(job_link)
+        if not job_id:
+            return Response({'error': 'Invalid job link, unable to extract job ID.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure the base CV exists and fetch its CVData
+        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+        if not base_cv or not hasattr(base_cv, 'cv_data'):
+            return Response({'error': 'Base CV or associated data is missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        base_cv_data = base_cv.cv_data
+
+        # Use the base CV data to construct the candidate profile
+        candidate_profile = construct_candidate_profile(base_cv_data)
+
+        # Construct the prompt for Gemini
+        prompt = construct_single_job_prompt(candidate_profile, job_description, job_link)
+
+        # Get the response from Gemini for scoring the job
+        try:
+            gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            job_score_data = json.loads(gemini_response)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Create or update the job based on the Gemini response
+        job_data = {
+            "title": job_score_data.get("title"),
+            "description": job_score_data.get("description", job_description),
+            "requirements": job_score_data.get("requirements"),
+            "company_name": job_score_data.get("company_name"),
+            "location": job_score_data.get("location"),
+            "employment_type": job_score_data.get("employment_type"),
+            "salary_range": job_score_data.get("salary_range"),
+            "min_salary": job_score_data.get("min_salary"),
+            "max_salary": job_score_data.get("max_salary"),
+            "benefits": job_score_data.get("benefits"),
+            "skills_required": job_score_data.get("skills_required"),
+            "posted_date": job_score_data.get("posted_date"),
+            "job_id": job_id,
+            "original_url": job_link
+        }
+        job, job_created = Job.objects.update_or_create(job_id=job_id, defaults=job_data)
+        score = job_score_data.get('score', 0)
+
+        # Create the JobSearch with the similarity score
+        JobSearch.objects.get_or_create(
+            candidate=candidate,
+            job=job,
+            defaults={"similarity_score": score}
+        )
+
+        if score < 50:
+            return Response({
+                'message': 'The job does not align well with your profile. Proceeding to tailor a resume is not recommended.',
+                'job_score_data': job_score_data
+            }, status=status.HTTP_200_OK)
+
+        # Check if a tailored CV for this job already exists
+        tailored_cv, created = CV.objects.get_or_create(
+            candidate=candidate,
+            cv_type=CV.TAILORED,
+            job=job
+        )
+
+        # Ensure CVData for the tailored CV
+        tailored_cv_data, _ = CVData.objects.get_or_create(cv=tailored_cv)
+
+        # Construct the tailored resume prompt
+        tailored_prompt = construct_tailored_job_prompt(base_cv_data, candidate, job_description)
+
+        # Get the response from Gemini for tailored CV data
+        try:
+            tailored_response = get_gemini_response(tailored_prompt)
+            tailored_response = (tailored_response.split("```json")[-1]).split("```")[0]
+            tailored_data = json.loads(tailored_response)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Update the tailored CVData
+        serializer = CVDataSerializer(tailored_cv_data, data=tailored_data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            deduct_credits(candidate, 'tailor_job_from_link')
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ExistingJobCVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Tailor a CV based on an existing job ID.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['job_id'],
+            properties={
+                'job_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID of the existing job'),
+            },
+        ),
+        responses={
+            200: CVDataSerializer(),
+            400: openapi.Response(description='Bad Request'),
+            403: openapi.Response(description='Insufficient credits.'),
+            404: openapi.Response(description='Job not found.'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
+    def post(self, request):
+        # Validate the provided job ID
+        job_id = request.data.get('job_id')
+        if not job_id:
+            return Response({'error': 'Job ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            job = Job.objects.get(id=job_id)
+        except Job.DoesNotExist:
+            return Response({'error': 'Job not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        candidate = request.user.candidate
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_job_from_existing')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Ensure the base CV exists and fetch its CVData
+        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+        if not base_cv or not hasattr(base_cv, 'cv_data'):
+            return Response({'error': 'Base CV or associated data is missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        base_cv_data = base_cv.cv_data
+
+        # Check if JobSearch exists for this candidate and job
+        job_search = JobSearch.objects.filter(candidate=candidate, job=job).first()
+        if job_search:
+            score = job_search.similarity_score
+        else:
+            # Construct a prompt for Gemini to get only the similarity score
+            prompt = construct_only_score_job_prompt(base_cv_data, job.description)
+            try:
+                gemini_response = get_gemini_response(prompt)
+                gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+                score_data = json.loads(gemini_response)
+                score = score_data.get("score", 0)
+            except Exception as e:
+                return Response({'error': f"Failed to fetch score from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Save the JobSearch with the calculated score
+            JobSearch.objects.create(candidate=candidate, job=job, similarity_score=score)
+
+        # If the score is less than 50, return a "not recommended" response
+        if score < 50:
+            return Response({
+                'message': f'The job does not align well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
+                'score': score
+            }, status=status.HTTP_200_OK)
+
+        # Check if a tailored CV for this job already exists
+        tailored_cv, created = CV.objects.get_or_create(
+            candidate=candidate,
+            cv_type=CV.TAILORED,
+            job=job
+        )
+
+        # Ensure CVData for the tailored CV
+        tailored_cv_data, _ = CVData.objects.get_or_create(cv=tailored_cv)
+
+        # Construct the tailored CV prompt
+        tailored_prompt = construct_tailored_job_prompt(base_cv_data, candidate, job.description)
+
+        # Get tailored CV data from Gemini
+        try:
+            tailored_response = get_gemini_response(tailored_prompt)
+            tailored_response = (tailored_response.split("```json")[-1]).split("```")[0]
+            tailored_data = json.loads(tailored_response)
+        except Exception as e:
+            return Response({'error': f"Failed to fetch tailored CV data from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Update the tailored CVData
+        serializer = CVDataSerializer(tailored_cv_data, data=tailored_data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            deduct_credits(candidate, 'tailor_job_from_existing')
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class JobDescriptionCVView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @swagger_auto_schema(
+        operation_description="Tailor a CV based on a provided job description.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['job_description'],
+            properties={
+                'job_description': openapi.Schema(type=openapi.TYPE_STRING, description='Job description text'),
+            },
+        ),
+        responses={
+            200: CVDataSerializer(),
+            201: CVDataSerializer(),
+            400: openapi.Response(description='Bad Request'),
+            403: openapi.Response(description='Insufficient credits.'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
     def post(self, request):
         job_description = request.data.get('job_description')
 
@@ -755,175 +1257,17 @@ class JobDescriptionCVView(APIView):
 
         # Check if the candidate has enough credits
         candidate = request.user.candidate
-        if candidate.credits <= 0:
-            return Response({'error': 'No credits available. Please purchase more credits.'},
-                            status=status.HTTP_403_FORBIDDEN)
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_job_from_description')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         # Check if the candidate already has CVData
         cv_data_instance = CVData.objects.filter(cv__candidate=candidate).first()
 
-        if cv_data_instance:
-            # Use the name from the existing CVData if available
-            name = cv_data_instance.name if cv_data_instance.name else f"{candidate.first_name} {candidate.last_name}"
-
-            # Determine which fields are missing
-            missing_fields = {
-                "age": cv_data_instance.age,
-                "work": cv_data_instance.work,
-                "educations": cv_data_instance.educations,
-            }
-
-            # Construct the prompt to ask for missing fields only
-            prompt = f"""
-                You are tasked with generating a JSON representation of a resume based on a job description.
-                The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
-                Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
-
-                Leave fields like work experiences, education, and other existing fields empty, except for the missing fields indicated below:
-
-                **Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
-                **Social**: Include a list of relevant soft skills based on the job description.
-                **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
-                **Languages**: Include any languages that could be relevant for the job.
-                **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
-                **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
-                **Interests**: Randomly generate a few interests.
-                **Age**: Leave age value as I passed it without any change.
-                **Work**: Leave work array as I passed it without any change.
-                **Educations**: Leave educations array as I passed it without any change.
-
-                If a city or country is found in the job description, use it as the candidate's location.
-
-                Return the data as a JSON with the following structure:
-                {{
-                    "title": "<job_title>",
-                    "name": "{name}",
-                    "email": "{candidate.user.email}",
-                    "phone": "{candidate.phone}",
-                    "age": {missing_fields['age']},
-                    "city": "<city>",
-                    "work": {missing_fields['work']},
-                    "educations": {missing_fields['educations']},
-                    "languages": [
-                        {{
-                            "language": "<language_name>",
-                            "level": "<proficiency>"
-                        }}
-                    ],
-                    "skills": [
-                        {{
-                            "skill": "<hard_skill_name>",
-                            "level": "<hard_skill_level>"
-                        }}
-                    ],
-                    "social": [
-                        {{
-                            "skill": "<soft_skill_name>"
-                        }}
-                    ],
-                    "certifications": [
-                        {{
-                            "certification": "<certification_title>",
-                            "institution": "<website_name>",
-                            "link": "<certification_link>",
-                            "date": null
-                        }}
-                    ],
-                    "projects": [
-                        {{
-                            "project_name": "<project_name>",
-                            "description": "<project_description>",
-                            "start_date": "",
-                            "end_date": ""
-                        }}
-                    ],
-                    "interests": [
-                        {{
-                            "interest": "<interest_1>"
-                        }}
-                    ],
-                    "headline": null,
-                    "summary": "<tailored_summary>"
-                }}
-
-                Here is the job description:
-                {job_description}
-            """
-        else:
-            # Construct the full prompt if no CVData exists
-            prompt = f"""
-                You are tasked with generating a JSON representation of a resume based on a job description.
-                The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
-                Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
-
-                You must leave the work experiences and education fields empty, as these should be filled only by the candidate.
-                However, you should intelligently fill the following fields to fit the job description:
-
-                **Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
-                **Social**: Include a list of relevant soft skills based on the job description.
-                **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
-                **Languages**: Include any languages that could be relevant for the job.
-                **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
-                **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
-                **Interests**: Randomly generate a few interests.
-
-                If a city or country is found in the job description, use it as the candidate's location.
-
-                Return the data as a JSON with the following structure:
-                {{
-                    "title": "<job_title>",
-                    "name": "{candidate.first_name} {candidate.last_name}",
-                    "email": "{candidate.user.email}",
-                    "phone": "{candidate.phone}",
-                    "age": null,
-                    "city": "<city>",
-                    "work": [],
-                    "educations": [],
-                    "languages": [
-                        {{
-                            "language": "<language_name>",
-                            "level": "<proficiency>"
-                        }}
-                    ],
-                    "skills": [
-                        {{
-                            "skill": "<hard_skill_name>",
-                            "level": "<hard_skill_level>"
-                        }}
-                    ],
-                    "social": [
-                        {{
-                            "skill": "<soft_skill_name>"
-                        }}
-                    ],
-                    "certifications": [
-                        {{
-                            "certification": "<certification_title>",
-                            "institution": "<website_name>",
-                            "link": "<certification_link>",
-                            "date": null
-                        }}
-                    ],
-                    "projects": [
-                        {{
-                            "project_name": "<project_name>",
-                            "description": "<project_description>",
-                            "start_date": "",
-                            "end_date": ""
-                        }}
-                    ],
-                    "interests": [
-                        {{
-                            "interest": "<interest_1>"
-                        }}
-                    ],
-                    "headline": null,
-                    "summary": "<tailored_summary>"
-                }}
-
-                Here is the job description:
-                {job_description}
-            """
+        prompt = construct_tailored_job_prompt(cv_data_instance, candidate, job_description)
 
         # Get the response from Gemini
         try:
@@ -946,8 +1290,7 @@ class JobDescriptionCVView(APIView):
 
         if serializer.is_valid():
             serializer.save()
-            candidate.credits -= 1
-            candidate.save()
+            deduct_credits(candidate, 'tailor_job_from_description')
             serialized_data = serializer.data
             serialized_data.pop('id', None)
             serialized_data.pop('cv', None)
@@ -959,6 +1302,7 @@ class JobDescriptionCVView(APIView):
 
 class TriggerScrapingView(APIView):
     permission_classes = [IsAuthenticated]  # Only authenticated users can access this endpoint
+    swagger_schema = None
 
     def post(self, request):
         candidate = request.user.candidate  # Get the authenticated candidate
@@ -978,30 +1322,56 @@ class TriggerScrapingView(APIView):
 class TemplateDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
+    @swagger_auto_schema(
+        operation_description="Retrieve the template associated with a Tailored CV.",
+        responses={
+            200: TemplateSerializer(),
+            404: openapi.Response(description='CV not found for candidate or Template not found')
+        }
+    )
+    def get(self, request, cv_id):
         candidate = request.user.candidate
-        cv = CV.objects.filter(candidate=candidate).first()
 
-        if cv and cv.template:
-            serializer = TemplateSerializer(cv.template)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        return Response({"detail": "Template not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    def post(self, request):
-        candidate = request.user.candidate
-        data = request.data
-        # Get the CV for the candidate
-        cv = CV.objects.filter(candidate=candidate).first()
-        if not cv:
+        # Retrieve the CV for the candidate with the given cv_id
+        try:
+            cv = CV.objects.get(candidate=candidate, id=cv_id)
+        except CV.DoesNotExist:
             return Response({"detail": "CV not found for candidate"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if template exists in CV
+        # Check if the CV has an associated template
+        if cv.template:
+            serializer = TemplateSerializer(cv.template)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Template not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @swagger_auto_schema(
+        operation_description="Create or update the template associated with a Tailored CV.",
+        request_body=TemplateSerializer,
+        responses={
+            200: TemplateSerializer(),
+            201: TemplateSerializer(),
+            400: openapi.Response(description='Template data is required to create a new template.'),
+            404: openapi.Response(description='CV not found for candidate')
+        }
+    )
+    def post(self, request, cv_id):
+        candidate = request.user.candidate
+        data = request.data
+
+        # Retrieve the CV for the candidate with the given cv_id
+        try:
+            cv = CV.objects.get(candidate=candidate, id=cv_id)
+        except CV.DoesNotExist:
+            return Response({"detail": "CV not found for candidate"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if a template already exists for this CV
         template = cv.template
         created = False
 
         # Handle creation or updating of Modele associated with Template
         modele_data = data.pop('templateData', None)
+
         if not template:
             # Create new Modele and Template if they don't exist
             if modele_data:
@@ -1015,6 +1385,8 @@ class TemplateDetailView(APIView):
                 cv.template = template
                 cv.save()
                 created = True
+            else:
+                return Response({"error": "Template data is required to create a new template."}, status=status.HTTP_400_BAD_REQUEST)
         else:
             # Update existing Modele
             if modele_data and template.templateData:
@@ -1027,21 +1399,53 @@ class TemplateDetailView(APIView):
                 setattr(template, attr, value)
             template.save()
 
-        # Serialize and return updated or created Template data
+        # Serialize and return the updated or created Template data
         serializer = TemplateSerializer(template)
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class TopUpView(APIView):
+    @swagger_auto_schema(
+        operation_description="Create a PayPal order to purchase credits.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['credits', 'pack_id'],
+            properties={
+                'credits': openapi.Schema(type=openapi.TYPE_INTEGER, description='Number of credits to purchase'),
+                'pack_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID of the credit pack'),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='Order created',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'orderId': openapi.Schema(type=openapi.TYPE_STRING, description='PayPal order ID'),
+                    }
+                )
+            ),
+            400: openapi.Response(description='Invalid credit amount or pack'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
     def post(self, request):
         credits = request.data.get('credits')
+        pack_id = request.data.get('pack_id')
 
-        # Validate credits amount
-        if credits not in PRICE_TABLE:
-            return Response({"error": "Invalid credit amount"}, status=status.HTTP_400_BAD_REQUEST)
+        # Validate the pack
+        try:
+            pack = Pack.objects.get(id=pack_id, is_active=True)
+        except Pack.DoesNotExist:
+            return Response({"error": "Invalid or inactive pack"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Calculate the price based on the credits
-        amount = PRICE_TABLE[credits]
+        # Validate credits and fetch the price
+        try:
+            price_entry = pack.prices.get(credits=credits)
+        except Price.DoesNotExist:
+            return Response({"error": "Invalid credit amount for the selected pack"}, status=status.HTTP_400_BAD_REQUEST)
+
+        amount = price_entry.price
 
         # Create the PayPal order request
         create_request = OrdersCreateRequest()
@@ -1076,6 +1480,31 @@ class TopUpView(APIView):
 
 
 class TopUpConfirmView(APIView):
+
+    @swagger_auto_schema(
+        operation_description="Confirm a PayPal order and add credits to the candidate's account.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['orderId'],
+            properties={
+                'orderId': openapi.Schema(type=openapi.TYPE_STRING, description='PayPal order ID'),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description='Order completed',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'status': openapi.Schema(type=openapi.TYPE_STRING, description='Status of the order'),
+                    }
+                )
+            ),
+            400: openapi.Response(description='Order ID is required or bad request'),
+            404: openapi.Response(description='Order not found or already paid'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
     def post(self, request):
         order_id = request.data.get('orderId')
         candidate = request.user.candidate
@@ -1111,3 +1540,409 @@ class TopUpConfirmView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CreateTailoredCVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Create a new tailored CV for a specific job.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['job_id'],
+            properties={
+                'job_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID of the job'),
+            },
+        ),
+        responses={
+            201: CVDataSerializer(),
+            400: openapi.Response(description='Bad Request'),
+            404: openapi.Response(description='Job not found.')
+        }
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+        job_id = request.data.get("job_id")
+
+        if not job_id:
+            return Response({"error": "Job ID is required to create a tailored CV."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if a tailored CV for the job already exists
+        if CV.objects.filter(candidate=candidate, cv_type=CV.TAILORED, job_id=job_id).exists():
+            return Response({"error": "A tailored CV for this job already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure the job exists
+        try:
+            job = Job.objects.get(id=job_id)
+        except Job.DoesNotExist:
+            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Create a new tailored CV and associated CVData
+        tailored_cv = CV.objects.create(candidate=candidate, cv_type=CV.TAILORED, job=job)
+        cv_data = CVData.objects.create(cv=tailored_cv)
+
+        # Serialize and return the data
+        serializer = CVDataSerializer(cv_data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class TailoredCVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Update a tailored CV's data.",
+        request_body=CVDataSerializer,
+        responses={
+            200: CVDataSerializer(),
+            400: openapi.Response(description='Bad Request'),
+            404: openapi.Response(description='Tailored CV not found or does not belong to the authenticated user.')
+        }
+    )
+    def put(self, request, cv_id):
+        candidate = request.user.candidate
+
+        # Retrieve the tailored CV
+        try:
+            tailored_cv = CV.objects.get(id=cv_id, candidate=candidate, cv_type=CV.TAILORED)
+        except CV.DoesNotExist:
+            return Response({"error": "Tailored CV not found or does not belong to the authenticated user."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Retrieve the CVData associated with the tailored CV
+        try:
+            cv_data = CVData.objects.get(cv=tailored_cv)
+        except CVData.DoesNotExist:
+            return Response({"error": "No associated CVData found for the tailored CV."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update the CVData
+        serializer = CVDataSerializer(cv_data, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @swagger_auto_schema(
+        operation_description="Delete a tailored CV.",
+        responses={
+            204: openapi.Response(description='Tailored CV deleted successfully.'),
+            404: openapi.Response(description='Tailored CV not found or does not belong to the authenticated user.')
+        }
+    )
+    def delete(self, request, cv_id):
+        candidate = request.user.candidate
+
+        try:
+            # Retrieve the tailored CV
+            tailored_cv = CV.objects.get(id=cv_id, candidate=candidate, cv_type=CV.TAILORED)
+
+            # Delete the associated CVData and the CV itself
+            if hasattr(tailored_cv, 'cv_data'):
+                tailored_cv.cv_data.delete()
+            tailored_cv.delete()
+
+            return Response({"detail": "Tailored CV deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        except CV.DoesNotExist:
+            return Response({"error": "Tailored CV not found or does not belong to the authenticated user."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+
+class CVFilter(django_filters.FilterSet):
+    # Filters for CV fields
+    job_title = django_filters.CharFilter(field_name="job__title", lookup_expr="icontains")
+    job_location = django_filters.CharFilter(field_name="job__location", lookup_expr="icontains")
+    created_at_after = django_filters.DateTimeFilter(field_name="created_at", lookup_expr="gte")
+    created_at_before = django_filters.DateTimeFilter(field_name="created_at", lookup_expr="lte")
+
+    # Filters for CVData fields
+    name = django_filters.CharFilter(field_name="cv_data__name", lookup_expr="icontains")
+    email = django_filters.CharFilter(field_name="cv_data__email", lookup_expr="icontains")
+    city = django_filters.CharFilter(field_name="cv_data__city", lookup_expr="icontains")
+    skills = django_filters.CharFilter(method="filter_by_skills")
+
+    class Meta:
+        model = CV
+        fields = [
+            "job_title", "job_location", "created_at_after", "created_at_before",
+            "name", "email", "city", "skills"
+        ]
+
+    def filter_by_skills(self, queryset, name, value):
+        skills = [skill.strip().lower() for skill in value.split(",")]
+        for skill in skills:
+            queryset = queryset.filter(Q(cv_data__skills__icontains=skill))
+        return queryset
+
+
+class CandidateTailoredCVsPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
+
+class CandidateTailoredCVsView(ListAPIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = CandidateTailoredCVsPagination
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = CVFilter
+    serializer_class = CVSerializer
+
+    def get_queryset(self):
+        # Retrieve only tailored CVs for the authenticated candidate
+        candidate = self.request.user.candidate
+        return CV.objects.filter(candidate=candidate, cv_type=CV.TAILORED).select_related("cv_data", "job")
+
+    @swagger_auto_schema(
+        operation_description="Retrieve a list of tailored CVs for the authenticated user.",
+        manual_parameters=[
+            openapi.Parameter('job_title', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job title'),
+            openapi.Parameter('job_location', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job location'),
+            openapi.Parameter('created_at_after', openapi.IN_QUERY, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME, description='Filter CVs created after this date'),
+            openapi.Parameter('created_at_before', openapi.IN_QUERY, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME, description='Filter CVs created before this date'),
+            openapi.Parameter('name', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by name'),
+            openapi.Parameter('email', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by email'),
+            openapi.Parameter('city', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by city'),
+            openapi.Parameter('skills', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by skills (comma-separated)'),
+            openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page number'),
+            openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Number of items per page'),
+        ],
+        responses={200: CVSerializer(many=True)},
+        security=[{'Bearer': []}],
+    )
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = CVSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CVSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class RemoveFavoriteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Remove a job from the candidate's favorites.",
+        responses={
+            204: openapi.Response(description='Favorite removed successfully.'),
+            404: openapi.Response(description='Favorite not found.')
+        }
+    )
+    def delete(self, request, job_id):
+        candidate = request.user.candidate
+
+        favorite = Favorite.objects.filter(candidate=candidate, job_id=job_id).first()
+        if not favorite:
+            return Response({"error": "Favorite not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        favorite.delete()
+        return Response({"detail": "Favorite removed successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+
+class GetFavoriteScoresView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Get similarity scores for favorite jobs.",
+        responses={
+            200: openapi.Response(
+                description='Job searches created successfully.',
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        'detail': openapi.Schema(type=openapi.TYPE_STRING, description='Detail message'),
+                        'scores': openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Items(
+                            type=openapi.TYPE_OBJECT,
+                                properties={
+                                    'id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Job ID'),
+                                    'score': openapi.Schema(type=openapi.TYPE_NUMBER, format='float', description='Similarity score'),
+                                }
+                            ),
+                            description='List of scores'
+                        ),
+                    }
+                )
+            ),
+            400: openapi.Response(description='Bad Request'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
+    def get(self, request):
+        candidate = request.user.candidate
+        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+        if not base_cv or not hasattr(base_cv, 'cv_data'):
+            return Response({'error': 'Base CV or associated data is missing.'}, status=status.HTTP_400_BAD_REQUEST)
+        base_cv_data = base_cv.cv_data
+        candidate_profile = construct_candidate_profile(base_cv_data)
+
+        # Exclude jobs that already have JobSearch
+        favorite_jobs = Favorite.objects.filter(candidate=candidate)
+        job_ids_with_search = JobSearch.objects.filter(candidate=candidate).values_list('job_id', flat=True)
+        jobs_to_compare = favorite_jobs.exclude(job_id__in=job_ids_with_search)
+
+        if not jobs_to_compare.exists():
+            return Response({"detail": "No new jobs to compare."}, status=status.HTTP_200_OK)
+
+        jobs_data = [
+            {
+                "id": job.job.id,
+                "title": job.job.title,
+                "description": job.job.description,
+                "requirements": ', '.join(job.job.requirements or []),
+                "skills": ', '.join(job.job.skills_required or [])
+            }
+            for job in jobs_to_compare
+        ]
+
+        prompt = construct_similarity_prompt(candidate_profile, jobs_data)
+        # Get scores from Gemini
+        try:
+            gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            scores = json.loads(gemini_response)
+
+            for score_data in scores:
+                job_id = score_data['id']
+                score = score_data['score']
+
+                job = Job.objects.get(id=job_id)
+                JobSearch.objects.create(candidate=candidate, job=job, similarity_score=score)
+
+            return Response({"detail": "Job searches created successfully.", "scores": scores}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserTemplateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve the template associated with the authenticated user's base CV.",
+        responses={
+            200: TemplateSerializer(),
+            404: openapi.Response(description='Base CV not found for candidate or Template not found')
+        }
+    )
+    def get(self, request):
+        candidate = request.user.candidate
+
+        # Retrieve the base CV for the candidate
+        try:
+            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+        except CV.DoesNotExist:
+            return Response({"detail": "Base CV not found for candidate"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if the CV has an associated template
+        if cv.template:
+            serializer = TemplateSerializer(cv.template)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Template not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+    @swagger_auto_schema(
+        operation_description="Create or update the template associated with the authenticated user's base CV.",
+        request_body=TemplateSerializer,
+        responses={
+            200: TemplateSerializer(),
+            201: TemplateSerializer(),
+            400: openapi.Response(description='Template data is required to create a new template.'),
+            404: openapi.Response(description='Base CV not found for candidate')
+        }
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+        data = request.data
+
+        # Retrieve the base CV for the candidate
+        try:
+            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+        except CV.DoesNotExist:
+            return Response({"detail": "Base CV not found for candidate"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if a template already exists for this CV
+        template = cv.template
+        created = False
+
+        # Handle creation or updating of Modele associated with Template
+        modele_data = data.pop('templateData', None)
+
+        if not template:
+            # Create new Modele and Template if they don't exist
+            if modele_data:
+                modele = Modele.objects.create(**modele_data)
+                template = Template.objects.create(
+                    name=data.get('name', ''),
+                    language=data.get('language', 'en'),
+                    reference=data.get('reference', None),
+                    templateData=modele
+                )
+                cv.template = template
+                cv.save()
+                created = True
+            else:
+                return Response({"error": "Template data is required to create a new template."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Update existing Modele
+            if modele_data and template.templateData:
+                for attr, value in modele_data.items():
+                    setattr(template.templateData, attr, value)
+                template.templateData.save()
+
+            # Update Template fields
+            for attr, value in data.items():
+                if hasattr(template, attr):
+                    setattr(template, attr, value)
+            template.save()
+
+        # Serialize and return the updated or created Template data
+        serializer = TemplateSerializer(template)
+        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class PackPricesView(APIView):
+    """
+    View to retrieve all active packs with their associated prices.
+    """
+    permission_classes = [IsAuthenticated]
+    @swagger_auto_schema(
+        operation_description="Retrieve all active packs with their associated prices.",
+        responses={
+            200: openapi.Response(
+                description="List of packs with prices.",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Pack ID'),
+                            'name': openapi.Schema(type=openapi.TYPE_STRING, description='Pack name'),
+                            'description': openapi.Schema(type=openapi.TYPE_STRING, description='Pack description'),
+                            'is_active': openapi.Schema(type=openapi.TYPE_BOOLEAN, description='Pack active status'),
+                            'prices': openapi.Schema(
+                                type=openapi.TYPE_ARRAY,
+                                items=openapi.Schema(
+                                    type=openapi.TYPE_OBJECT,
+                                    properties={
+                                        'credits': openapi.Schema(type=openapi.TYPE_INTEGER, description='Number of credits'),
+                                        'price': openapi.Schema(type=openapi.TYPE_STRING, description='Price of the credits'),
+                                    }
+                                )
+                            )
+                        }
+                    )
+                )
+            ),
+            404: openapi.Response(description="No active packs found.")
+        }
+    )
+    def get(self, request):
+        # Retrieve all active packs with their associated prices
+        packs = Pack.objects.filter(is_active=True).prefetch_related('prices')
+        if not packs.exists():
+            return Response({"error": "No active packs found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = PackSerializer(packs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

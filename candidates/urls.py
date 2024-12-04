@@ -1,45 +1,51 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    CandidateViewSet, CVViewSet, CVDataViewSet, JobViewSet, JobSearchViewSet,
-    PaymentViewSet, CreditPurchaseViewSet, SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView,
-    TriggerScrapingView, LogoutView, CurrentUserView, UpdateCandidateView, ChangePasswordView, CandidateJobsView,
-    DeleteJobSearchView, UpdateJobSearchStatusView, CVDataView, DeleteCVView, UpdateOrCreateCVDataView,
-    TemplateDetailView, TopUpView, TopUpConfirmView
+    SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView,
+    TriggerScrapingView, LogoutView, ChangePasswordView, CandidateJobsView,
+    CVDataView, DeleteCVView, UpdateOrCreateCVDataView, TemplateDetailView, TopUpView, TopUpConfirmView,
+    JobLinkCVView, CreateTailoredCVView, TailoredCVView, ExistingJobCVView, UserTemplateView,
+    CandidateTailoredCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView,
+    UserProfileView, PackPricesView
 )
 from django.contrib.auth import views as auth_views
 
 
 router = DefaultRouter()
-router.register(r'cvs', CVViewSet)
-router.register(r'cvdata', CVDataViewSet)
-router.register(r'payments', PaymentViewSet)
-router.register(r'creditpurchases', CreditPurchaseViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('signup/', SignUpView.as_view(), name='signup'),
-    path('login/', LoginView.as_view(), name='login'),
-    path('logout/', LogoutView.as_view(), name='logout'),
-    path('current/', CurrentUserView.as_view(), name='current-user'),
-    path('password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),
-    path('password_reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
+    path('auth/signup/', SignUpView.as_view(), name='signup'),
+    path('auth/login/', LoginView.as_view(), name='login'),
+    path('auth/logout/', LogoutView.as_view(), name='logout'),
+    path('auth/password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),
+    path('auth/password_reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
+
+    path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/me/password/', ChangePasswordView.as_view(), name='change-password'),
+
     path('reset/<uidb64>/<token>/', auth_views.PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('reset/done/', auth_views.PasswordResetCompleteView.as_view(), name='password_reset_complete'),
-    path('upload-cv/', UploadCVView.as_view(), name='upload_cv'),
-    path('linkedin-cv/', LinkedInCVView.as_view(), name='linkedin_cv'),
-    path('job-description-cv/', JobDescriptionCVView.as_view(), name='job_description_cv'),
-    path('scrape-jobs/', TriggerScrapingView.as_view(), name='trigger_scraping'),
-    path('candidate/update/', UpdateCandidateView.as_view(), name='update-candidate'),
-    path('change-password/', ChangePasswordView.as_view(), name='change-password'),
-    path('candidate-jobs/', CandidateJobsView.as_view(), name='candidate-jobs'),
-    path('jobsearches/<int:job_id>/delete/', DeleteJobSearchView.as_view(), name='delete-jobsearch'),
-    path('jobsearches/<int:job_id>/update-status/', UpdateJobSearchStatusView.as_view(),
-         name='update-jobsearch-status'),
-    path('cv-data/', CVDataView.as_view(), name='cv-data'),
-    path('cv/<int:cv_id>/delete/', DeleteCVView.as_view(), name='delete-cv'),
-    path('cv/update-cvdata/', UpdateOrCreateCVDataView.as_view(), name='update-cvdata'),
-    path('cv/template/', TemplateDetailView.as_view(), name='template-detail'),
-    path('top-up', TopUpView.as_view(), name='top-up'),
-    path('top-up-confirm', TopUpConfirmView.as_view(), name='top-up-confirm'),
+
+    path('cvs/base/upload/', UploadCVView.as_view(), name='upload_cv'),
+    path('cvs/base/linkedin/', LinkedInCVView.as_view(), name='linkedin_cv'),
+    path('cvs/base/cvdata/', CVDataView.as_view(), name='cv-data'),
+    path('cvs/base/template/', UserTemplateView.as_view(), name='user-template'),
+    path('cvs/tailored/', CandidateTailoredCVsView.as_view(), name='candidate-tailored-cvs'),
+    path('cvs/tailored/<int:cv_id>/', TailoredCVView.as_view(), name='update_tailored_cv'),
+    path('cvs/tailored/job-description/', JobDescriptionCVView.as_view(), name='job_description_cv'),
+    path('cvs/tailored/job-link/', JobLinkCVView.as_view(), name='job_link_cv'),
+    path('cvs/tailored/existing-job/', ExistingJobCVView.as_view(), name='existing_job_cv'),
+    path('cvs/tailored/<int:cv_id>/', DeleteCVView.as_view(), name='delete-cv'),
+    path('cvs/tailored/<int:cv_id>/template/', TemplateDetailView.as_view(), name='template-detail'),
+
+    path('jobs/all/', CandidateJobsView.as_view(), name='candidate-jobs'),
+    path('jobs/scrape/', TriggerScrapingView.as_view(), name='trigger_scraping'),
+    path('jobs/favorites/', CandidateFavoriteJobsView.as_view(), name='candidate-favorite-jobs'),
+    path('jobs/favorites/<int:job_id>/', RemoveFavoriteView.as_view(), name='remove_favorite'),
+    path('jobs/favorites/scores/', GetFavoriteScoresView.as_view(), name='favorite_scores'),
+
+    path('credits/top-up/', TopUpView.as_view(), name='top-up'),
+    path('credits/top-up/confirm/', TopUpConfirmView.as_view(), name='top-up-confirm'),
+    path('credits/prices', PackPricesView.as_view(), name='top-up-confirm'),
 ]

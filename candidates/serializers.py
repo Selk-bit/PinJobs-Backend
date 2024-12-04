@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Modele, Template
+from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Modele, Template, Location, Keyword,
+                     Price, Pack)
 from django.contrib.auth.models import User
 
 
@@ -14,13 +15,7 @@ class CandidateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'user', 'num_jobs_to_scrape', 'scrape_interval', 'scrape_unit']
-
-
-class CVSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CV
-        fields = ['id', 'candidate', 'original_file', 'generated_html', 'generated_pdf', 'created_at', 'updated_at']
+        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'user']
 
 
 class ModeleSerializer(serializers.ModelSerializer):
@@ -67,6 +62,15 @@ class JobSerializer(serializers.ModelSerializer):
         fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type"]
 
 
+class CVSerializer(serializers.ModelSerializer):
+    job = JobSerializer()
+    cv_data = CVDataSerializer()
+
+    class Meta:
+        model = CV
+        fields = ['id', 'candidate', 'original_file', 'generated_pdf', 'cv_data', 'job', 'created_at', 'updated_at']
+
+
 class JobSearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobSearch
@@ -83,3 +87,29 @@ class CreditPurchaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CreditPurchase
         fields = '__all__'
+
+
+class KeywordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Keyword
+        fields = '__all__'
+
+
+class LocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
+        fields = '__all__'
+
+
+class PriceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Price
+        fields = ['credits', 'price']
+
+
+class PackSerializer(serializers.ModelSerializer):
+    prices = PriceSerializer(many=True)
+
+    class Meta:
+        model = Pack
+        fields = ['id', 'name', 'description', 'is_active', 'prices']
