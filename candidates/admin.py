@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele
+from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele, Keyword, Location,
+                     ScrapingSettings, Pack, Price, CreditAction, KeywordLocationCombination, Favorite)
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
 from django_celery_results.models import TaskResult
@@ -40,7 +41,7 @@ class CandidateAdmin(admin.ModelAdmin):
 
 @admin.register(CV)
 class CVAdmin(admin.ModelAdmin):
-    list_display = ('candidate', 'created_at', 'updated_at')
+    list_display = ('candidate', 'cv_type', 'created_at', 'updated_at')
     search_fields = ('candidate__first_name', 'candidate__last_name')
 
 
@@ -55,7 +56,7 @@ class CVDataAdmin(admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ('title', 'company_name', 'location', 'employment_type', 'job_type', 'posted_date')
+    list_display = ('id', 'title', 'company_name', 'location', 'employment_type', 'job_type', 'posted_date')
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }
@@ -72,4 +73,53 @@ class JobSearchAdmin(admin.ModelAdmin):
 class CreditPurchaseAdmin(admin.ModelAdmin):
     list_display = ('id', 'candidate', 'credits_purchased', 'timestamp')
     search_fields = ('candidate__first_name',)
+
+
+@admin.register(Keyword)
+class KeywordAdmin(admin.ModelAdmin):
+    list_display = ['keyword']
+    fields = ['keyword']
+    search_fields = ['keyword__keyword']
+
+
+@admin.register(Location)
+class LocationAdmin(admin.ModelAdmin):
+    list_display = ['location']
+    fields = ['location']
+    search_fields = ['location__location']
+
+
+@admin.register(ScrapingSettings)
+class ScrapingSettingsAdmin(admin.ModelAdmin):
+    list_display = ('num_jobs_to_scrape', 'is_scraping')
+
+
+@admin.register(Pack)
+class PackAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at']
+    search_fields = ['name']
+    list_filter = ['is_active']
+
+
+@admin.register(Price)
+class PriceAdmin(admin.ModelAdmin):
+    list_display = ['pack', 'credits', 'price']
+    search_fields = ['pack__name', 'credits']
+    list_filter = ['pack']
+
+
+@admin.register(CreditAction)
+class CreditActionAdmin(admin.ModelAdmin):
+    list_display = ['action_name', 'credit_cost']
+    search_fields = ['action_name']
+
+
+@admin.register(KeywordLocationCombination)
+class KeywordLocationCombinationAdmin(admin.ModelAdmin):
+    list_display = ['keyword', 'location', 'is_scraped']
+
+
+@admin.register(Favorite)
+class FavoriteAdmin(admin.ModelAdmin):
+    list_display = ['candidate', 'job', 'created_at']
 

@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 
 
 class Candidate(models.Model):
@@ -11,15 +12,15 @@ class Candidate(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)  # New field for country
     credits = models.IntegerField(default=0)
-    num_jobs_to_scrape = models.IntegerField(default=10)
-    scrape_interval = models.IntegerField(default=1)  # Number of intervals (e.g., every 1 hour)
-    scrape_unit = models.CharField(
-        max_length=10,
-        choices=[('hours', 'Hours'), ('days', 'Days'), ('weeks', 'Weeks')],
-        default='hours'
-    )
-    last_scrape_time = models.DateTimeField(blank=True, null=True)
-    is_scraping = models.BooleanField(default=False)
+    # num_jobs_to_scrape = models.IntegerField(default=10)
+    # scrape_interval = models.IntegerField(default=1)
+    # scrape_unit = models.CharField(
+    #     max_length=10,
+    #     choices=[('hours', 'Hours'), ('days', 'Days'), ('weeks', 'Weeks')],
+    #     default='hours'
+    # )
+    # last_scrape_time = models.DateTimeField(blank=True, null=True)
+    # is_scraping = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -64,12 +65,13 @@ class Modele(models.Model):
     references = models.JSONField(default=dict)
     skills = models.JSONField(default=dict)
     social = models.JSONField(default=dict)
-    theme = models.JSONField(default=dict)         # color settings
-    personnel = models.JSONField(default=dict)     # display settings for personal information
-    typography = models.JSONField(default=dict)    # font and typography settings
+    theme = models.JSONField(default=dict)
+    personnel = models.JSONField(default=dict)
+    typography = models.JSONField(default=dict)
 
     def __str__(self):
         return f"Modele for Template {self.template}"
+
 
 class Template(models.Model):
     name = models.CharField(max_length=255)
@@ -85,25 +87,44 @@ class Template(models.Model):
 
 
 class CV(models.Model):
-    candidate = models.OneToOneField(Candidate, on_delete=models.CASCADE)
+    BASE = 'base'
+    TAILORED = 'tailored'
+
+    CV_TYPE_CHOICES = [
+        (BASE, 'Base CV'),
+        (TAILORED, 'Tailored CV'),
+    ]
+
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name='cvs')
     original_file = models.FileField(upload_to='cvs/original/', blank=True, null=True)
     template = models.OneToOneField(Template, on_delete=models.SET_NULL, null=True, blank=True)
     generated_pdf = models.FileField(upload_to='cvs/pdf/', blank=True, null=True)
+    cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
+    job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"CV for {self.candidate.first_name} {self.candidate.last_name}"
+        return f"{self.get_cv_type_display()} for {self.candidate.first_name} {self.candidate.last_name}"
+
+    @property
+    def is_base_cv(self):
+        return self.cv_type == self.BASE
+
+    @property
+    def is_tailored_cv(self):
+        return self.cv_type == self.TAILORED
 
 
 class CVData(models.Model):
-    cv = models.ForeignKey(CV, on_delete=models.CASCADE, related_name='cv_data')
+    cv = models.OneToOneField(CV, on_delete=models.CASCADE, related_name='cv_data')
     title = models.CharField(max_length=100, blank=True, null=True)
     name = models.CharField(max_length=100, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
+    yoe = models.CharField(max_length=100, blank=True, null=True)
     work = models.JSONField(blank=True, null=True)
     educations = models.JSONField(blank=True, null=True)
     languages = models.JSONField(blank=True, null=True)
@@ -120,7 +141,7 @@ class CVData(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Data for CV of {self.cv.candidate.first_name} {self.cv.candidate.last_name}"
+        return f"Data for {self.cv.get_cv_type_display()} of {self.cv.candidate.first_name} {self.cv.candidate.last_name}"
 
 
 class Job(models.Model):
@@ -143,7 +164,7 @@ class Job(models.Model):
         blank=True,
         null=True
     )
-    original_url = models.URLField()
+    original_url = models.CharField(max_length=255)
 
     salary_range = models.CharField(max_length=100, blank=True, null=True)
     min_salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
@@ -169,6 +190,7 @@ class Job(models.Model):
         choices=JOB_TYPE_CHOICES,
         default='full-time'
     )
+    job_id = models.CharField(max_length=50, unique=True, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -233,3 +255,91 @@ class CreditPurchase(models.Model):
 
     def __str__(self):
         return f"{self.credits_purchased} credits for {self.candidate}"
+
+
+class Keyword(models.Model):
+    keyword = models.CharField(max_length=100, unique=True)
+    is_scraped = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.keyword
+
+
+class Location(models.Model):
+    location = models.CharField(max_length=100, unique=True)
+    is_scraped = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.location
+
+
+class KeywordLocationCombination(models.Model):
+    keyword = models.ForeignKey(Keyword, on_delete=models.CASCADE)
+    location = models.ForeignKey(Location, on_delete=models.CASCADE)
+    is_scraped = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ('keyword', 'location')
+
+    def __str__(self):
+        return f"{self.keyword.keyword} + {self.location.location}"
+
+
+class ScrapingSettings(models.Model):
+    num_jobs_to_scrape = models.IntegerField(default=100)
+    is_scraping = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Scraping Settings: {self.num_jobs_to_scrape} jobs"
+
+    def save(self, *args, **kwargs):
+        if not self.pk and ScrapingSettings.objects.exists():
+            # This below line will render error by breaking page, you will see
+            raise ValidationError(
+                "There can be only one instance of settings, you can not add another"
+            )
+            return None
+
+        return super(ScrapingSettings, self).save(*args, **kwargs)
+
+
+class Pack(models.Model):
+    name = models.CharField(max_length=100, unique=True)  # e.g., "Basic Pack", "Advanced Pack"
+    description = models.TextField(blank=True, null=True)  # Optional description
+    is_active = models.BooleanField(default=True)  # Indicates if the pack is active
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Price(models.Model):
+    pack = models.ForeignKey(Pack, on_delete=models.CASCADE, related_name='prices')  # Link to the Pack
+    credits = models.PositiveIntegerField()  # Number of credits
+    price = models.DecimalField(max_digits=10, decimal_places=2)  # Price in USD or other currency
+
+    class Meta:
+        unique_together = ('pack', 'credits')  # Ensure no duplicate credit options in the same pack
+
+    def __str__(self):
+        return f"{self.credits} credits for ${self.price} ({self.pack.name})"
+
+
+class CreditAction(models.Model):
+    action_name = models.CharField(max_length=100, unique=True)
+    credit_cost = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"{self.action_name} - {self.credit_cost} credits"
+
+
+class Favorite(models.Model):
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name="favorites")
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="favorited_by")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('candidate', 'job')  # Ensure no duplicate favorites
+
+

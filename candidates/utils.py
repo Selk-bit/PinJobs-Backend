@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import psutil
 import shutil
 from .constants import *
-from .models import Job, JobSearch, Notification
+from .models import Job, JobSearch, CVData, CreditAction
 from django.core.files.storage import default_storage
 from paypalcheckoutsdk.core import PayPalHttpClient, SandboxEnvironment
 from bs4 import BeautifulSoup
@@ -21,14 +21,16 @@ import aiohttp
 from datetime import datetime
 import requests
 from fake_useragent import UserAgent
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
+from .serializers import CVDataSerializer
 
 ua = UserAgent()
 client_id = os.getenv('PAYPAL_CLIENT_ID')
 client_secret = os.getenv('PAYPAL_CLIENT_SECRET')
 environment = SandboxEnvironment(client_id=client_id, client_secret=client_secret)
 paypal_client = PayPalHttpClient(environment)
+MAX_TOTAL = 200
 PRICE_TABLE = {
     20: 60,
     40: 120,
@@ -45,6 +47,15 @@ PRICE_TABLE = {
     6000: 5940,
     8000: 7920,
     10000: 9900
+}
+ALLOWED_JOB_DOMAINS = {
+    "linkedin.com": "/jobs/view/",
+    "indeed.com": "/rc/clk/"
+}
+Cookies = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Cookie": 'lang=v=2&lang=en-us; bcookie="v=2&13690459-2695-4db8-8920-eb8acafd8bb0"; lidc="b=OGST01:s=O:r=O:a=O:p=O:g=3446:u=1:x=1:i=1731604780:t=1731691180:v=2:sig=AQH9Fke10UQG9Y2cVZtB9GxcuhLRjHYT"; __cf_bm=t1G.2BT5aBYyrtSdXb1i1P1C62LySBfwfGB0qPAeJKM-1731604780-1.0.1.1-vsyEyIXbZoIk2K9ZdnwsX_JX50i.PWUOGpCco0p_8YN4Ox9urlWJdFzhWVcmSx2mMfquMeUrLfJB4OmWaplE_g; JSESSIONID=ajax:7418003674519976640; bscookie="v=1&20241114171953262036d0-c9e0-4821-8104-95261fbea1f2AQGQhsqDVF82rmiyryMBtG9R_9mqrteN"; AMCVS_14215E3D5995C57C0A495C55%40AdobeOrg=1; AMCV_14215E3D5995C57C0A495C55%40AdobeOrg=-637568504%7CMCIDTS%7C20042%7CMCMID%7C24006825359064228502848929369249235580%7CMCAAMLH-1732209601%7C6%7CMCAAMB-1732209601%7C6G1ynYcLPuiQxYZrsz_pkqfLG9yMXBpb2zX5dvJdYQJzPXImdj0y%7CMCOPTOUT-1731612001s%7CNONE%7CvVersion%7C5.1.1; aam_uuid=24229005248847717212830020980619194807; _gcl_au=1.1.1528757662.1731604801; ccookie=0001AQGJ9Xfxg73P4wAAAZMrsWe4+zApGcXdE5zp5BKFyMPBrHTrMd+HPwNATFZpf3K6yYhWGy2cxQN+vft6FExugPGJMfXh49ZkQd/J9FOALHHAvt1wIQ3G5zTTqlpL6u+YtBHNSdhX62lCOcKPgISJ2Jsn3ifKnxsiOANIowr213txeQ==; _uetsid=ae1cad00a2ac11ef941fe55ffdabcbc5; _uetvid=ae1cc490a2ac11efa8cd6b2dc3fdb04a',
+    "Upgrade-Insecure-Requests": "1"
 }
 
 
@@ -89,6 +100,52 @@ def construct_url(keyword, location):
     location_encoded = urllib.parse.quote(location)
     url = f"https://www.linkedin.com/jobs/search?keywords={keyword_encoded}&location={location_encoded}&position=1&pageNum=0"
     return url
+
+
+def construct_job_description(soup):
+    description_parts = []
+
+    # Extract job title
+    title_tag = soup.find('h2', class_='top-card-layout__title')
+    title = title_tag.get_text(strip=True) if title_tag else None
+
+    # Extract company name
+    company_tag = soup.find('a', class_=re.compile('topcard__org-name-link'))
+    company_name = company_tag.get_text(strip=True) if company_tag else None
+
+    # Extract location
+    location_tag = soup.find('span', class_='topcard__flavor topcard__flavor--bullet')
+    location = location_tag.get_text(strip=True) if location_tag else None
+
+    # Extract job description
+    description_tag = soup.find('div', class_='description__text description__text--rich')
+    if description_tag:
+        text = description_tag.get_text(separator='\n', strip=True).replace('Show more', '').replace('Show less', '')
+        description_parts.append(text)
+
+    criteria_tag = soup.find('div', class_='description__job-criteria-list')
+    if criteria_tag:
+        text = criteria_tag.get_text(separator='\n', strip=True).replace('Show more', '').replace('Show less', '')
+        description_parts.append(text)
+
+    concatenated_description = '\n'.join(description_parts).strip() if description_parts else None
+
+    return title, company_name, location, concatenated_description
+
+
+def extract_job_id(job_url):
+    """
+    Extracts the job ID from a LinkedIn job URL.
+    """
+    match = re.search(r'-(\d+)\?|/jobs/view/(\d+)', job_url)
+    if match:
+        return match.group(1) or match.group(2)
+    return None
+
+
+def construct_job_detail_url(url):
+    job_id = extract_job_id(url)
+    return f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 
 
 def construct_pagination_url(original_url, start):
@@ -284,6 +341,51 @@ def kill_chrome(driver):
     # clear_recent_temp_files(get_temp_dir(), age_minutes=200)
 
 
+def construct_prompt_without_score(jobs_data):
+    # Define the JSON format matching the Django model
+
+    json_format = {
+        "title": "string",
+        "description": "string",
+        "requirements": "list of strings (try extracting requirements from the description if they're not clearly listed, don't list required hard skills, but other contextual requirements if found)",
+        "company_name": "string",
+        "company_size": "integer (set null if it's not available)",
+        "location": "string (set null if it's not available)",
+        "employment_type": "string (choices: 'remote', 'hybrid', 'on-site')",
+        "linkedin_profiles": "list of strings (set null if they're not available)",
+        "original_url": "string (URL)",
+        "salary_range": "string (write the string as it, set null if it's not available)",
+        "min_salary": "string (the minimum salary can be found in the salary_range, get the number only without adding any alpha character. set null if it's not available, and if there was only one number and not a range, extract it here)",
+        "max_salary": "string (the maximum salary can be found in the salary_range, get the number only without adding any alpha character. set null if it's not available, and if there was only one number and not a range, extract it here)",
+        "benefits": "list of strings (set null if they're not available)",
+        "skills_required": "list of strings (try extracting skills from the description if they're not clearly listed. Only focus on technical skills and soft skills, avoid general hard skills such as 'Software Development', they need to be specific)",
+        "posted_date": "string (date in YYYY-MM-DD format, set null if it's not available)",
+        "industry": "string (set null if it's not available)",
+        "job_type": "string (choices: 'full-time', 'part-time', 'contract', 'freelance', 'CDD', 'CDI', 'other')",
+    }
+    prompt = f"""
+    You are provided with a list of job postings.
+
+    **Instructions:**
+
+    - Rewrite the job description in a more structured manner to avoid duplication of the original text.
+    - Extract all available data from the job postings.
+    - Respond with a JSON array containing objects for each job, following the specified JSON format below.
+    - Do not include any comments or explanations in your response. Only provide the JSON array.
+
+    **JSON Format:**
+
+    {json.dumps(json_format, indent=4)}
+
+    **Job Postings:**
+
+    {json.dumps(jobs_data, indent=4, ensure_ascii=False)}
+
+    **Please provide the JSON array as your response, without adding any comment, or using an editor. Only the JSON.**
+    """
+    return prompt
+
+
 def construct_prompt(candidate_profile, jobs_data):
     # Define the JSON format matching the Django model
 
@@ -373,17 +475,11 @@ def construct_prompt(candidate_profile, jobs_data):
     return prompt
 
 
-def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
+def scrape_jobs(keyword, location, num_jobs_to_scrape):
     # Read candidate profile
-    candidate_profile = candidate_data
-    candidate = candidate_profile['candidate']
     partial_jobs_collected = []
     total_jobs_collected = []
     anchors_processed = set()
-
-    # Extract keyword and location from candidate profile
-    keyword = candidate_profile['title']
-    location = candidate_profile['city']
 
     # Construct the search URL
     multiple_jobs_url = construct_url(keyword, location)
@@ -391,9 +487,9 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
     # Headers for the HTTP requests
     multiple_jobs_headers = {
         "User-Agent": f"Mozilla/5.0 (Windows NT {random.randint(6, 10)}.{random.randint(0, 3)}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(80, 95)}.0.{random.randint(3000, 4000)}.{random.randint(100, 150)} Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Cookie": 'lang=v=2&lang=en-us; bcookie="v=2&13690459-2695-4db8-8920-eb8acafd8bb0"; lidc="b=OGST01:s=O:r=O:a=O:p=O:g=3446:u=1:x=1:i=1731604780:t=1731691180:v=2:sig=AQH9Fke10UQG9Y2cVZtB9GxcuhLRjHYT"; __cf_bm=t1G.2BT5aBYyrtSdXb1i1P1C62LySBfwfGB0qPAeJKM-1731604780-1.0.1.1-vsyEyIXbZoIk2K9ZdnwsX_JX50i.PWUOGpCco0p_8YN4Ox9urlWJdFzhWVcmSx2mMfquMeUrLfJB4OmWaplE_g; JSESSIONID=ajax:7418003674519976640; bscookie="v=1&20241114171953262036d0-c9e0-4821-8104-95261fbea1f2AQGQhsqDVF82rmiyryMBtG9R_9mqrteN"; AMCVS_14215E3D5995C57C0A495C55%40AdobeOrg=1; AMCV_14215E3D5995C57C0A495C55%40AdobeOrg=-637568504%7CMCIDTS%7C20042%7CMCMID%7C24006825359064228502848929369249235580%7CMCAAMLH-1732209601%7C6%7CMCAAMB-1732209601%7C6G1ynYcLPuiQxYZrsz_pkqfLG9yMXBpb2zX5dvJdYQJzPXImdj0y%7CMCOPTOUT-1731612001s%7CNONE%7CvVersion%7C5.1.1; aam_uuid=24229005248847717212830020980619194807; _gcl_au=1.1.1528757662.1731604801; ccookie=0001AQGJ9Xfxg73P4wAAAZMrsWe4+zApGcXdE5zp5BKFyMPBrHTrMd+HPwNATFZpf3K6yYhWGy2cxQN+vft6FExugPGJMfXh49ZkQd/J9FOALHHAvt1wIQ3G5zTTqlpL6u+YtBHNSdhX62lCOcKPgISJ2Jsn3ifKnxsiOANIowr213txeQ==; _uetsid=ae1cad00a2ac11ef941fe55ffdabcbc5; _uetvid=ae1cc490a2ac11efa8cd6b2dc3fdb04a',
-        "Upgrade-Insecure-Requests": "1"
+        "Accept": Cookies["Accept"],
+        "Cookie": Cookies["Cookie"],
+        "Upgrade-Insecure-Requests": Cookies["Upgrade-Insecure-Requests"],
     }
 
     def fetch_page_with_retry(url, headers, substring, max_retries=50):
@@ -420,8 +516,8 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
     soup = BeautifulSoup(initial_page_text, 'html.parser')
     job_listings = soup.find_all('li')
 
-    existing_job_searches = JobSearch.objects.filter(candidate=candidate)
-    already_scraped_urls = [job_search.job.original_url for job_search in existing_job_searches]
+    # Get already scraped jobs (based on Job table)
+    already_scraped_urls = Job.objects.values_list('original_url', flat=True)
 
     # Extract total number of jobs from the title
     title_tag = soup.find('title')
@@ -435,6 +531,7 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
     else:
         total_jobs = len(job_listings)
 
+    total_jobs = min(MAX_TOTAL, total_jobs)
     # Calculate start values for pagination
     start_values = list(range(25, total_jobs, 25))
 
@@ -492,9 +589,9 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
             try:
                 single_job_headers = {
                     "User-Agent": ua.random,
-                    "Accept": multiple_jobs_headers["Accept"],
-                    "Cookie": 'lang=v=2&lang=en-us;',
-                    "Upgrade-Insecure-Requests": "1"
+                    "Accept": Cookies["Accept"],
+                    "Cookie": Cookies["Cookie"],
+                    "Upgrade-Insecure-Requests": Cookies["Upgrade-Insecure-Requests"],
                 }
                 async with session.get(url, headers=single_job_headers) as response:
                     text = await response.text()
@@ -509,65 +606,56 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
         return None
 
     async def process_job(session, job):
-        # Extract job ID from the original job URL
-        job_id_match = re.search(r'-(\d+)\?', job['url'])
-        if job_id_match:
-            job_id = job_id_match.group(1)
-        else:
-            print(f"Failed to extract job ID from URL: {job['url']}")
-            return
-
         # Construct the new job detail URL
-        job_detail_url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
-
+        job_detail_url = construct_job_detail_url(job['url'])
+        if not job_detail_url:
+            return
         job_detail_text = await fetch_job_detail(session, job_detail_url, "top-card-layout__title", 100)
         if job_detail_text:
             # Parse the job detail page
-            soup = BeautifulSoup(job_detail_text, 'html.parser')
+            job_soup = BeautifulSoup(job_detail_text, 'html.parser')
             # Extract required data
-            # Title
-            title_tag = soup.find('h2', class_='top-card-layout__title')
-            title = title_tag.get_text(strip=True) if title_tag else None
-            # Company name
-            company_tag = soup.find('a', class_=re.compile('topcard__org-name-link'))
-            company_name = company_tag.get_text(strip=True) if company_tag else None
-            # Location
-            location_tag = soup.find('span', class_='topcard__flavor topcard__flavor--bullet')
-            location = location_tag.get_text(strip=True) if location_tag else None
-            # Salary (leave empty)
-            salary = None
-            # Description
-            description_parts = []
-            description_tag = soup.find('div', class_='description__text description__text--rich')
-            if description_tag:
-                text = description_tag.get_text(separator='\n', strip=True)
-                text = text.replace('Show more', '').replace('Show less', '').strip()
-                description_parts.append(text)
-            criteria_tag = soup.find('div', class_='description__job-criteria-list')
-            if criteria_tag:
-                text = criteria_tag.get_text(separator='\n', strip=True)
-                text = text.replace('Show more', '').replace('Show less', '').strip()
-                description_parts.append(text)
-            description = '\n'.join(description_parts) if description_parts else None
+            title, company_name, loc, description = construct_job_description(job_soup)
             # Collect data
             job['title'] = title
             job['company_name'] = company_name
             job['location'] = location
-            job['salary_range'] = salary
             job['description'] = description
             job['original_url'] = job['url']
-            # job['posted_date'] is already set from earlier
             partial_jobs_collected.append(job)
             total_jobs_collected.append(job)
 
             print(f"Title: {title}")
             print(f"Company: {company_name}")
             print(f"Location: {location}")
-            print(f"Salary: {salary}")
             print(f"Description: {description}")
             print(f"Posted Date: {job['date'] if job['date'] else 'N/A'}")
             print(f"Job URL: {job['url']}")
             print("-" * 80)
+
+            # Process jobs in batches and send to Gemini
+            if len(partial_jobs_collected) == BATCH_SIZE:
+                for i in range(0, len(partial_jobs_collected), BATCH_SIZE):
+                    jobs_batch = partial_jobs_collected[i:i + BATCH_SIZE]
+                    prompt = construct_prompt_without_score(jobs_batch)
+                    gemini_response = get_gemini_response(prompt)
+                    if "```" in gemini_response:
+                        gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+                    try:
+                        jobs_with_scores = json.loads(gemini_response)
+                        print("Gemini Response:")
+                        print(json.dumps(jobs_with_scores, indent=4, ensure_ascii=False))
+                        # Create jobs and job searches in the database
+                        # for job_data in jobs_with_scores:
+                        #     await process_and_save_job(job_data)
+                        await asyncio.gather(
+                            *(process_and_save_job(job_data) for job_data in jobs_with_scores)
+                        )
+                        partial_jobs_collected.clear()  # Clear the processed batch
+                    except json.JSONDecodeError as e:
+                        print(f"Error parsing Gemini response: {e}")
+                        print("Gemini response was:")
+                        print(gemini_response)
         else:
             print(f"Failed to fetch job detail for URL: {job_detail_url}")
 
@@ -587,84 +675,501 @@ def scrape_jobs(cv_data, candidate_data, num_jobs_to_scrape):
     # Run the main function to fetch job details
     asyncio.run(main(jobs_data))
 
-    # Process jobs in batches and send to Gemini
-    batch_size = 5
-    for i in range(0, len(partial_jobs_collected), batch_size):
-        jobs_batch = partial_jobs_collected[i:i+batch_size]
-        prompt = construct_prompt(cv_data, jobs_batch)
-        gemini_response = get_gemini_response(prompt)
-        if "```" in gemini_response:
-            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-        try:
-            jobs_with_scores = json.loads(gemini_response)
-            print("Gemini Response:")
-            print(json.dumps(jobs_with_scores, indent=4, ensure_ascii=False))
-            # Create jobs and job searches in the database
-            for job_data in jobs_with_scores:
-                # Normalize the job URL to remove query parameters
-                job_url_no_query = job_data['original_url'].split("?")[0]
-
-                # Check if the job already exists
-                existing_job = Job.objects.filter(original_url=job_url_no_query).first()
-
-                if existing_job:
-                    # Check if a JobSearch exists for the authenticated candidate and the existing job
-                    if not JobSearch.objects.filter(candidate=candidate, job=existing_job).exists():
-                        # Create a JobSearch for the existing job
-                        JobSearch.objects.create(
-                            candidate=candidate,
-                            job=existing_job,
-                            similarity_score=job_data['score']
-                        )
-                        candidate.credits -= 1  # Deduct one credit for creating the JobSearch
-                        candidate.save()
-                    else:
-                        print(f"JobSearch already exists for candidate and job: {job_url_no_query}")
-                else:
-                    # Create a new job if it doesn't exist
-                    job = Job.objects.create(
-                        title=job_data['title'],
-                        description=job_data['description'],
-                        company_name=job_data['company_name'],
-                        location=job_data['location'],
-                        salary_range=job_data.get('salary_range'),
-                        min_salary=job_data.get('min_salary'),
-                        max_salary=job_data.get('max_salary'),
-                        employment_type=job_data.get('employment_type', 'full-time'),
-                        original_url=job_url_no_query,
-                        skills_required=job_data['skills_required'],
-                        requirements=job_data['requirements'],
-                        benefits=job_data['benefits'],
-                        posted_date=job_data.get('posted_date')
-                    )
-
-                    # Create a JobSearch for this candidate and job
-                    JobSearch.objects.create(
-                        candidate=candidate,
-                        job=job,
-                        similarity_score=job_data['score']
-                    )
-                    candidate.credits -= 1  # Deduct one credit for creating the JobSearch
-                    candidate.save()
-                # notification = Notification.objects.create(
-                #     candidate=candidate,
-                #     job=job,
-                #     message=f"A new job '{job.title}' at {job.company_name} has been added to your job search."
-                # )
-                #
-                # # Send notification to WebSocket
-                # channel_layer = get_channel_layer()
-                # async_to_sync(channel_layer.group_send)(
-                #     f"notifications_{candidate.user.id}",
-                #     {
-                #         "type": "send_notification",
-                #         "message": notification.message
-                #     }
-                # )
-
-        except json.JSONDecodeError as e:
-            print(f"Error parsing Gemini response: {e}")
-            print("Gemini response was:")
-            print(gemini_response)
-
     print("Scraping completed successfully.")
+    return total_jobs_collected
+
+
+def is_valid_job_url(url):
+    """
+    Validates if the URL belongs to an allowed domain and matches the job link indicator.
+    """
+    parsed_url = urllib.parse.urlparse(url)
+    domain = parsed_url.netloc
+    path = parsed_url.path
+
+    for allowed_domain, job_indicator in ALLOWED_JOB_DOMAINS.items():
+        if allowed_domain in domain and job_indicator in path:
+            return True
+    return False
+
+
+def fetch_job_description(url, max_retries=100):
+    """
+    Fetches the job description from a job URL by retrying up to max_retries times.
+    """
+    for _ in range(max_retries):
+        headers = {
+            "User-Agent": ua.random,
+            "Accept": Cookies["Accept"],
+            "Cookie": Cookies["Cookie"],
+            "Upgrade-Insecure-Requests": Cookies["Upgrade-Insecure-Requests"],
+        }
+        try:
+            job_detail_url = construct_job_detail_url(url)
+            print(job_detail_url)
+            response = requests.get(job_detail_url, headers=headers)
+
+            if response.status_code == 200:
+                # Parse the HTML using BeautifulSoup
+                soup = BeautifulSoup(response.text, 'html.parser')
+                # Extract the job description
+                _, _, _, description = construct_job_description(soup)
+                return description
+        except Exception as e:
+            time.sleep(random.uniform(3, 15))
+    return None
+
+
+def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
+    if cv_data_instance:
+        # Use the name from the existing CVData if available
+        name = cv_data_instance.name if cv_data_instance.name else f"{candidate.first_name} {candidate.last_name}"
+        # Determine which fields are missing
+        missing_fields = {
+            "age": cv_data_instance.age,
+            "work": cv_data_instance.work,
+            "educations": cv_data_instance.educations,
+        }
+
+        # Construct the prompt to ask for missing fields only
+        prompt = f"""
+            You are tasked with generating a JSON representation of a resume based on a job description.
+            The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
+            Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
+
+            Leave fields like work experiences, education, and other existing fields empty, except for the missing fields indicated below:
+
+            **Skills**: Include a list of relevant hard skills based on the job description, replacing the original skills in the profile with the ones mentioned in the job description intelligently in a way that aligns with the candidate's experience and education. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
+            **Social**: Include a list of relevant soft skills based on the job description.
+            **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
+            **Languages**: Include any languages that could be relevant for the job.
+            **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
+            **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
+            **Interests**: Randomly generate a few interests.
+            **Age**: Leave age value as I passed it without any change.
+            **Work**: Leave work array as I passed it without any change.
+            **Educations**: Leave educations array as I passed it without any change.
+
+            If a city or country is found in the job description, use it as the candidate's location.
+
+            Return the data as a JSON with the following structure:
+            {{
+                "title": "<job_title>",
+                "name": "{name}",
+                "email": "{candidate.user.email}",
+                "phone": "{candidate.phone}",
+                "age": {missing_fields['age']},
+                "city": "<city>",
+                "work": {missing_fields['work']},
+                "educations": {missing_fields['educations']},
+                "languages": [
+                    {{
+                        "language": "<language_name>",
+                        "level": "<proficiency>"
+                    }}
+                ],
+                "skills": [
+                    {{
+                        "skill": "<hard_skill_name>",
+                        "level": "<hard_skill_level>"
+                    }}
+                ],
+                "social": [
+                    {{
+                        "skill": "<soft_skill_name>"
+                    }}
+                ],
+                "certifications": [
+                    {{
+                        "certification": "<certification_title>",
+                        "institution": "<website_name>",
+                        "link": "<certification_link>",
+                        "date": null
+                    }}
+                ],
+                "projects": [
+                    {{
+                        "project_name": "<project_name>",
+                        "description": "<project_description>",
+                        "start_date": "",
+                        "end_date": ""
+                    }}
+                ],
+                "interests": [
+                    {{
+                        "interest": "<interest_1>"
+                    }}
+                ],
+                "headline": null,
+                "summary": "<tailored_summary>"
+            }}
+
+            Here is the job description:
+            {job_description}
+        """
+    else:
+        # Construct the full prompt if no CVData exists
+        prompt = f"""
+            You are tasked with generating a JSON representation of a resume based on a job description.
+            The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
+            Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
+
+            You must leave the work experiences and education fields empty, as these should be filled only by the candidate.
+            However, you should intelligently fill the following fields to fit the job description:
+
+            **Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
+            **Social**: Include a list of relevant soft skills based on the job description.
+            **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
+            **Languages**: Include any languages that could be relevant for the job.
+            **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
+            **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
+            **Interests**: Randomly generate a few interests.
+
+            If a city or country is found in the job description, use it as the candidate's location.
+
+            Return the data as a JSON with the following structure:
+            {{
+                "title": "<job_title>",
+                "name": "{candidate.first_name} {candidate.last_name}",
+                "email": "{candidate.user.email}",
+                "phone": "{candidate.phone}",
+                "age": null,
+                "city": "<city>",
+                "work": [],
+                "educations": [],
+                "languages": [
+                    {{
+                        "language": "<language_name>",
+                        "level": "<proficiency>"
+                    }}
+                ],
+                "skills": [
+                    {{
+                        "skill": "<hard_skill_name>",
+                        "level": "<hard_skill_level>"
+                    }}
+                ],
+                "social": [
+                    {{
+                        "skill": "<soft_skill_name>"
+                    }}
+                ],
+                "certifications": [
+                    {{
+                        "certification": "<certification_title>",
+                        "institution": "<website_name>",
+                        "link": "<certification_link>",
+                        "date": null
+                    }}
+                ],
+                "projects": [
+                    {{
+                        "project_name": "<project_name>",
+                        "description": "<project_description>",
+                        "start_date": "",
+                        "end_date": ""
+                    }}
+                ],
+                "interests": [
+                    {{
+                        "interest": "<interest_1>"
+                    }}
+                ],
+                "headline": null,
+                "summary": "<tailored_summary>"
+            }}
+
+            Here is the job description:
+            {job_description}
+        """
+
+    return prompt
+
+
+def construct_candidate_profile(cv_data):
+    """
+    Constructs a JSON representation of the candidate's CV data for Gemini.
+    """
+    # Fetch CVData associated with the given CV
+    # cv_data = CVData.objects.filter(cv=cv).first()
+
+    # Serialize CVData if available
+    if cv_data:
+        serialized_cv_data = CVDataSerializer(cv_data).data
+    else:
+        serialized_cv_data = {field: None for field in CVDataSerializer.Meta.fields}
+    return serialized_cv_data
+
+
+def construct_single_job_prompt(candidate_profile, job_description, job_url):
+    """
+    Constructs a prompt for scoring a single job based on the candidate's profile.
+    """
+    json_format = {
+        "title": "string",
+        "description": "string",
+        "requirements": "list of strings (try extracting requirements from the description if they're not clearly listed, don't list required hard skills, but other contextual requirements if found)",
+        "company_name": "string",
+        "company_size": "integer (set null if it's not available)",
+        "location": "string (set null if it's not available)",
+        "employment_type": "string (choices: 'remote', 'hybrid', 'on-site')",
+        "linkedin_profiles": "list of strings (set null if they're not available)",
+        "original_url": "string (URL)",
+        "salary_range": "string (write the string as it, set null if it's not available)",
+        "min_salary": "string (the minimum salary can be found in the salary_range, get the number only without adding any alpha character. set null if it's not available, and if there was only one number and not a range, extract it here)",
+        "max_salary": "string (the maximum salary can be found in the salary_range, get the number only without adding any alpha character. set null if it's not available, and if there was only one number and not a range, extract it here)",
+        "benefits": "list of strings (set null if they're not available)",
+        "skills_required": "list of strings (try extracting all skills from the description. Only focus on technical skills and soft skills, avoid general hard skills such as 'Software Development', they need to be specific)",
+        "posted_date": "string (date in YYYY-MM-DD format, set null if it's not available)",
+        "industry": "string (set null if it's not available)",
+        "job_type": "string (choices: 'full-time', 'part-time', 'contract', 'freelance', 'CDD', 'CDI', 'other')",
+        "score": "float (matching score out of 100, with decimals for granularity, it shouldn't be null under any circumstance)"
+    }
+
+    prompt = f"""
+    You are provided with a candidate's profile in JSON format and a single job posting. Your task is to compare the candidate's profile with the job and assign a matching score based on the following refined criteria:
+
+    1. **Location Match (20 points):**
+       - **20 points:** Candidate's city matches the job location or the job is remote.
+       - **15 points:** Candidate's city is within the same region or state as the job.
+       - **10 points:** Candidate's city is within the same country.
+       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
+       - **0 points:** Locations are different with no indication of relocation.
+
+    2. **Experience Match (20 points):**
+       - Calculate the percentage of required experience met by the candidate.
+       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
+       - If the candidate exceeds the required experience, cap the score at 20 points.
+
+    3. **Skills Match (30 points):**
+       - Compare the required skills with the candidate's skills.
+       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
+       - Include both hard and soft skills in the assessment.
+
+    4. **Education Match (10 points):**
+       - **10 points:** Candidate's education level exceeds the requirement.
+       - **8 points:** Candidate's education level meets the requirement.
+       - **5 points:** Candidate's education is slightly below the requirement.
+       - **0 points:** Candidate's education does not meet the requirement.
+
+    5. **Role Requirements Match (10 points):**
+       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
+       - **Points Awarded:** (Relevance Percentage) * 10
+       - Use detailed analysis to determine relevance.
+
+    6. **Language Proficiency (5 points):**
+       - **5 points:** Candidate fully meets language requirements.
+       - **2-4 points:** Candidate partially meets language requirements.
+       - **0 points:** Candidate does not meet language requirements.
+
+    7. **Additional Criteria (5 points):**
+       - Consider certifications, interests, and other relevant factors.
+       - **Points Awarded:** (Relevance Percentage) * 5
+
+    **Instructions:**
+
+    - Calculate the total score out of 100 points, allowing for decimal values down to .001 to increase granularity. Please be as strict and accurate as possible following the specified criteria.
+    - Rewrite the job description in a more structured manner to avoid duplication of the original text.
+    - Extract all available data from the job posting.
+    - Respond with a JSON object following the specified JSON format below.
+    - Add a key called "score" in the object, representing the matching score (use a float value for precision).
+    - Do not include any comments or explanations in your response. Only provide the JSON object.
+
+    **JSON Format:**
+
+    {json.dumps(json_format, indent=4)}
+
+    **Candidate Profile:**
+
+    {json.dumps(candidate_profile, indent=4, ensure_ascii=False)}
+
+    **Job Posting:**
+
+    {{
+        "url": "{job_url}",x
+        "description": "{job_description}"
+    }}
+
+    **Please provide the JSON object as your response, without adding any comment, or using an editor. Only the JSON.**
+    """
+    return prompt
+
+
+def has_sufficient_credits(candidate, action_name):
+    try:
+        credit_action = CreditAction.objects.get(action_name=action_name)
+    except CreditAction.DoesNotExist:
+        raise ValueError(f"Action '{action_name}' is not defined in CreditAction.")
+
+    if candidate.credits < credit_action.credit_cost:
+        return False, credit_action.credit_cost
+    return True, credit_action.credit_cost
+
+
+def deduct_credits(candidate, action_name):
+    sufficient, credit_cost = has_sufficient_credits(candidate, action_name)
+    if not sufficient:
+        return False, credit_cost
+
+    # Deduct the required credits
+    candidate.credits -= credit_cost
+    candidate.save()
+    return True, credit_cost
+
+
+def construct_only_score_job_prompt(candidate_profile, job_description):
+    """
+    Construct a prompt asking Gemini to only calculate the similarity score.
+    """
+    prompt = f"""
+    You are provided with a candidate's profile in JSON format and a job description.
+    Your task is to calculate the similarity score based on the following refined criteria:
+
+    1. **Location Match (20 points):**
+       - **20 points:** Candidate's city matches the job location or the job is remote.
+       - **15 points:** Candidate's city is within the same region or state as the job.
+       - **10 points:** Candidate's city is within the same country.
+       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
+       - **0 points:** Locations are different with no indication of relocation.
+
+    2. **Experience Match (20 points):**
+       - Calculate the percentage of required experience met by the candidate.
+       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
+       - If the candidate exceeds the required experience, cap the score at 20 points.
+
+    3. **Skills Match (30 points):**
+       - Compare the required skills with the candidate's skills.
+       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
+       - Include both hard and soft skills in the assessment.
+
+    4. **Education Match (10 points):**
+       - **10 points:** Candidate's education level exceeds the requirement.
+       - **8 points:** Candidate's education level meets the requirement.
+       - **5 points:** Candidate's education is slightly below the requirement.
+       - **0 points:** Candidate's education does not meet the requirement.
+
+    5. **Role Requirements Match (10 points):**
+       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
+       - **Points Awarded:** (Relevance Percentage) * 10
+       - Use detailed analysis to determine relevance.
+
+    6. **Language Proficiency (5 points):**
+       - **5 points:** Candidate fully meets language requirements.
+       - **2-4 points:** Candidate partially meets language requirements.
+       - **0 points:** Candidate does not meet language requirements.
+
+    7. **Additional Criteria (5 points):**
+       - Consider certifications, interests, and other relevant factors.
+       - **Points Awarded:** (Relevance Percentage) * 5
+
+    **Instructions:**
+    - Calculate the total score out of 100.
+    - Respond with a JSON object containing only the "score" key.
+
+    **Candidate Profile:**
+    {json.dumps(CVDataSerializer(candidate_profile).data, indent=4, ensure_ascii=False)}
+
+    **Job Description:**
+    {job_description}
+    """
+    return prompt
+
+
+@sync_to_async
+def process_and_save_job(job_data):
+    """
+    Process and save a single job using Django ORM.
+    """
+    job_url_no_query = job_data['original_url'].split("?")[0]
+    job_id = extract_job_id(job_data['original_url'])
+
+    if not job_id:
+        return None  # Skip invalid job data
+
+    existing_job = Job.objects.filter(job_id=job_id).first()
+    print(job_id)
+    if not existing_job:
+        # Create a new job if it doesn't exist
+        Job.objects.create(
+            title=job_data['title'],
+            description=job_data['description'],
+            company_name=job_data['company_name'],
+            location=job_data['location'],
+            salary_range=job_data.get('salary_range'),
+            min_salary=job_data.get('min_salary'),
+            max_salary=job_data.get('max_salary'),
+            employment_type=job_data.get('employment_type', 'full-time'),
+            original_url=job_url_no_query,
+            skills_required=job_data['skills_required'],
+            requirements=job_data['requirements'],
+            benefits=job_data['benefits'],
+            posted_date=job_data.get('posted_date'),
+            job_id=job_id
+        )
+
+
+def construct_similarity_prompt(candidate_profile, jobs_data):
+    """
+    Constructs a prompt for getting similarity scores between a candidate's profile and a list of jobs.
+    """
+    prompt = f"""
+    You are provided with a candidate's profile in JSON format and a list of job postings. Your task is to compare the candidate's profile with each job and assign a matching score based on the following refined criteria:
+
+    1. **Location Match (20 points):**
+       - **20 points:** Candidate's city matches the job location or the job is remote.
+       - **15 points:** Candidate's city is within the same region or state as the job.
+       - **10 points:** Candidate's city is within the same country.
+       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
+       - **0 points:** Locations are different with no indication of relocation.
+
+    2. **Experience Match (20 points):**
+       - Calculate the percentage of required experience met by the candidate.
+       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
+       - If the candidate exceeds the required experience, cap the score at 20 points.
+
+    3. **Skills Match (30 points):**
+       - Compare the required skills with the candidate's skills.
+       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
+       - Include both hard and soft skills in the assessment.
+
+    4. **Education Match (10 points):**
+       - **10 points:** Candidate's education level exceeds the requirement.
+       - **8 points:** Candidate's education level meets the requirement.
+       - **5 points:** Candidate's education is slightly below the requirement.
+       - **0 points:** Candidate's education does not meet the requirement.
+
+    5. **Role Requirements Match (10 points):**
+       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
+       - **Points Awarded:** (Relevance Percentage) * 10
+       - Use detailed analysis to determine relevance.
+
+    6. **Language Proficiency (5 points):**
+       - **5 points:** Candidate fully meets language requirements.
+       - **2-4 points:** Candidate partially meets language requirements.
+       - **0 points:** Candidate does not meet language requirements.
+
+    7. **Additional Criteria (5 points):**
+       - Consider certifications, interests, and other relevant factors.
+       - **Points Awarded:** (Relevance Percentage) * 5
+
+    **Instructions:**
+    - For each job, calculate the total score out of 100 points, allowing for decimal values down to .001 to increase granularity. Please be as strict and accurate as possible following the specified criteria. 
+    - Respond with a JSON array containing objects for each job, including only the job ID and the calculated score.
+
+    **JSON Format:**
+    [
+        {{
+            "id": "integer (the unique ID of the job)",
+            "score": "float (matching score out of 100, with decimals for granularity)"
+        }}
+    ]
+
+    **Candidate Profile:**
+    {json.dumps(candidate_profile, indent=4, ensure_ascii=False)}
+
+    **Job Postings:**
+    {json.dumps(jobs_data, indent=4, ensure_ascii=False)}
+
+    **Please provide the JSON array as your response, without adding any comments or explanations. Only the JSON.**
+    """
+    return prompt

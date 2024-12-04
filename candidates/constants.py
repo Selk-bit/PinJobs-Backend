@@ -22,3 +22,4 @@ POPULAR_WEBSITES = [
     "https://www.reddit.com",
     "https://www.bbc.com",
 ]
+BATCH_SIZE = 5
