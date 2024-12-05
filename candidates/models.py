@@ -85,15 +85,34 @@ class Template(models.Model):
 
 
 class CV(models.Model):
-    candidate = models.OneToOneField(Candidate, on_delete=models.CASCADE)
+    BASE = 'base'
+    TAILORED = 'tailored'
+
+    CV_TYPE_CHOICES = [
+        (BASE, 'Base CV'),
+        (TAILORED, 'Tailored CV'),
+    ]
+
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name='cvs')
     original_file = models.FileField(upload_to='cvs/original/', blank=True, null=True)
     template = models.OneToOneField(Template, on_delete=models.SET_NULL, null=True, blank=True)
     generated_pdf = models.FileField(upload_to='cvs/pdf/', blank=True, null=True)
+    cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
+    job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"CV for {self.candidate.first_name} {self.candidate.last_name}"
+        return f"{self.get_cv_type_display()} for {self.candidate.first_name} {self.candidate.last_name}"
+
+    @property
+    def is_base_cv(self):
+        return self.cv_type == self.BASE
+
+    @property
+    def is_tailored_cv(self):
+        return self.cv_type == self.TAILORED
+
 
 
 class CVData(models.Model):
