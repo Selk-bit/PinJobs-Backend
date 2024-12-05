@@ -14,7 +14,7 @@ class CandidateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'user', 'num_jobs_to_scrape', 'scrape_interval', 'scrape_unit']
+        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'user']
 
 
 class CVSerializer(serializers.ModelSerializer):
