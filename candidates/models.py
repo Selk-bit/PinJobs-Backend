@@ -11,15 +11,15 @@ class Candidate(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)  # New field for country
     credits = models.IntegerField(default=0)
-    num_jobs_to_scrape = models.IntegerField(default=10)
-    scrape_interval = models.IntegerField(default=1)  # Number of intervals (e.g., every 1 hour)
-    scrape_unit = models.CharField(
-        max_length=10,
-        choices=[('hours', 'Hours'), ('days', 'Days'), ('weeks', 'Weeks')],
-        default='hours'
-    )
-    last_scrape_time = models.DateTimeField(blank=True, null=True)
-    is_scraping = models.BooleanField(default=False)
+    # num_jobs_to_scrape = models.IntegerField(default=10)
+    # scrape_interval = models.IntegerField(default=1)  # Number of intervals (e.g., every 1 hour)
+    # scrape_unit = models.CharField(
+    #     max_length=10,
+    #     choices=[('hours', 'Hours'), ('days', 'Days'), ('weeks', 'Weeks')],
+    #     default='hours'
+    # )
+    # last_scrape_time = models.DateTimeField(blank=True, null=True)
+    # is_scraping = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
