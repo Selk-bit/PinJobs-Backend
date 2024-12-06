@@ -184,6 +184,28 @@ class CandidateJobsView(APIView):
         page_size_query_param = 'page_size'
         max_page_size = 100
 
+    @swagger_auto_schema(
+        operation_description="Retrieve a list of jobs with optional filters and similarity scores for the authenticated candidate.",
+        manual_parameters=[
+            openapi.Parameter('description', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job description (contains).'),
+            openapi.Parameter('company_name', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by company name (contains).'),
+            openapi.Parameter('requirements', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job requirements (contains).'),
+            openapi.Parameter('location', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job location (contains).'),
+            openapi.Parameter('industry', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job industry (contains).'),
+            openapi.Parameter('employment_type', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by employment type (choices: remote, hybrid, on-site).'),
+            openapi.Parameter('job_type', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job type (choices: full-time, part-time, contract, freelance, CDD, CDI, other).'),
+            openapi.Parameter('min_salary', openapi.IN_QUERY, type=openapi.TYPE_NUMBER, description='Filter by minimum salary (greater than or equal).'),
+            openapi.Parameter('max_salary', openapi.IN_QUERY, type=openapi.TYPE_NUMBER, description='Filter by maximum salary (less than or equal).'),
+            openapi.Parameter('posted_date_range_after', openapi.IN_QUERY, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME, description='Filter jobs posted after this date.'),
+            openapi.Parameter('posted_date_range_before', openapi.IN_QUERY, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME, description='Filter jobs posted before this date.'),
+            openapi.Parameter('skills', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by required skills (comma-separated).'),
+            openapi.Parameter('search', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Search across title, description, company name, requirements, and benefits.'),
+            openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page number.'),
+            openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Number of items per page.'),
+        ],
+        responses={200: JobSerializer(many=True)},
+        security=[{'Bearer': []}]
+    )
     def get(self, request):
         # Get the authenticated candidate
         candidate = request.user.candidate
@@ -1590,6 +1612,58 @@ class TailoredCVView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
+        operation_description="Retrieve an individual tailored CV and its associated data.",
+        responses={
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="Tailored CV not found."),
+        }
+    )
+    def get(self, request, cv_id):
+        candidate = request.user.candidate
+
+        try:
+            # Retrieve the tailored CV
+            tailored_cv = CV.objects.get(id=cv_id, candidate=candidate, cv_type=CV.TAILORED)
+            serializer = CVSerializer(tailored_cv)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except CV.DoesNotExist:
+            return Response({"error": "Tailored CV not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    @swagger_auto_schema(
+        operation_description="Create a new tailored CV.",
+        request_body=CVDataSerializer,
+        responses={
+            201: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            403: openapi.Response(description="A tailored CV for this job already exists."),
+        }
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+        job_id = request.data.get("job_id")
+
+        if not job_id:
+            return Response({"error": "Job ID is required to create a tailored CV."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if a tailored CV for this job already exists
+        if CV.objects.filter(candidate=candidate, cv_type=CV.TAILORED, job_id=job_id).exists():
+            return Response({"error": "A tailored CV for this job already exists."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Ensure the job exists
+            job = Job.objects.get(id=job_id)
+        except Job.DoesNotExist:
+            return Response({"error": "The specified job does not exist."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Create a new tailored CV and associated CVData
+        tailored_cv = CV.objects.create(candidate=candidate, cv_type=CV.TAILORED, job=job)
+        cv_data = CVData.objects.create(cv=tailored_cv)
+
+        serializer = CVSerializer(tailored_cv)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @swagger_auto_schema(
         operation_description="Update a tailored CV's data.",
         request_body=CVDataSerializer,
         responses={
@@ -1716,6 +1790,32 @@ class CandidateTailoredCVsView(ListAPIView):
 
         serializer = CVSerializer(queryset, many=True)
         return Response(serializer.data)
+
+    @swagger_auto_schema(
+        operation_description="Create a new tailored CV without associating it with a job.",
+        request_body=CVDataSerializer,
+        responses={
+            201: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+        }
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+
+        # Validate the provided CVData
+        serializer = CVDataSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create a new tailored CV
+        tailored_cv = CV.objects.create(candidate=candidate, cv_type=CV.TAILORED, job=None)
+
+        # Create CVData linked to the newly created CV
+        serializer.save(cv=tailored_cv)
+
+        # Serialize the response
+        tailored_cv_serializer = CVSerializer(tailored_cv)
+        return Response(tailored_cv_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class RemoveFavoriteView(APIView):
