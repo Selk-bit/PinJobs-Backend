@@ -41,7 +41,7 @@ class CandidateAdmin(admin.ModelAdmin):
 
 @admin.register(CV)
 class CVAdmin(admin.ModelAdmin):
-    list_display = ('candidate', 'cv_type', 'created_at', 'updated_at')
+    list_display = ('id', 'candidate', 'cv_type', 'created_at', 'updated_at')
     search_fields = ('candidate__first_name', 'candidate__last_name')
 
 
