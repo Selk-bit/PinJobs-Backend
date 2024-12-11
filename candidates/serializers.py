@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Modele, Template, Location, Keyword,
-                     Price, Pack)
+from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
+                     Price, Pack, AbstractTemplate)
 from django.contrib.auth.models import User
 
 
@@ -18,26 +18,52 @@ class CandidateSerializer(serializers.ModelSerializer):
         fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'user']
 
 
-class ModeleSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Modele
-        fields = [
-            "identity", "template", "company_logo", "page", "certifications", "education",
-            "experience", "volunteering", "interests", "languages", "projects",
-            "references", "skills", "social", "theme", "personnel", "typography"
-        ]
-
-
 class TemplateSerializer(serializers.ModelSerializer):
-    templateData = ModeleSerializer()
+    name = serializers.CharField(source="abstract_template.name", read_only=True)
+    reference = serializers.CharField(source="abstract_template.reference", read_only=True)
+    language = serializers.CharField(source="abstract_template.language", read_only=True)
+    templateData = serializers.SerializerMethodField()
 
     class Meta:
         model = Template
-        fields = ["id", "name", "language", "reference", "templateData"]
+        fields = [
+            "id", "name", "language", "reference", "identity", "templateData", "created_at", "updated_at"
+        ]
+
+    def get_templateData(self, obj):
+        """
+        Return the nested structure for `templateData`, mimicking the old serializer.
+        """
+        return {
+            "identity": obj.abstract_template.reference,
+            "template": obj.abstract_template.name,
+            "company_logo": obj.company_logo,
+            "page": obj.page,
+            "certifications": obj.certifications,
+            "education": obj.education,
+            "experience": obj.experience,
+            "volunteering": obj.volunteering,
+            "interests": obj.interests,
+            "languages": obj.languages,
+            "projects": obj.projects,
+            "references": obj.references,
+            "skills": obj.skills,
+            "social": obj.social,
+            "theme": obj.theme,
+            "personnel": obj.personnel,
+            "typography": obj.typography,
+        }
+
+
+class AbstractTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AbstractTemplate
+        fields = ["id", "name", "reference", "image", "created_at", "updated_at"]
 
 
 class CVDataSerializer(serializers.ModelSerializer):
     cv_id = serializers.IntegerField(source='cv.id', read_only=True)
+    title = serializers.SerializerMethodField()
 
     class Meta:
         model = CVData
@@ -47,6 +73,9 @@ class CVDataSerializer(serializers.ModelSerializer):
             "social", "certifications", "projects", "volunteering",
             "references", "headline", "summary",
         ]
+
+    def get_title(self, obj):
+        return obj.headline
 
     def to_internal_value(self, data):
         # Convert empty strings to None for nullable fields
@@ -65,10 +94,11 @@ class JobSerializer(serializers.ModelSerializer):
 class CVSerializer(serializers.ModelSerializer):
     job = JobSerializer()
     cv_data = CVDataSerializer()
+    thumbnail = serializers.ImageField(read_only=True)
 
     class Meta:
         model = CV
-        fields = ['id', 'candidate', 'original_file', 'generated_pdf', 'cv_data', 'job', 'created_at', 'updated_at']
+        fields = ['id', 'candidate', 'original_file', 'generated_pdf', 'thumbnail', 'cv_data', 'job', 'created_at', 'updated_at']
 
 
 class JobSearchSerializer(serializers.ModelSerializer):

@@ -531,9 +531,10 @@ def scrape_jobs(keyword, location, num_jobs_to_scrape):
     else:
         total_jobs = len(job_listings)
 
-    total_jobs = min(MAX_TOTAL, total_jobs)
+    total_jobs = max(MAX_TOTAL, total_jobs)
+
     # Calculate start values for pagination
-    start_values = list(range(25, total_jobs, 25))
+    start_values = list(range(0, total_jobs, 25))
 
     # Function to process job listings from a page
     def process_job_listings(soup):
@@ -560,7 +561,7 @@ def scrape_jobs(keyword, location, num_jobs_to_scrape):
                     jobs_data.append({'url': job_url, 'date': job_datetime_str})
 
     # Process initial page
-    process_job_listings(soup)
+    # process_job_listings(soup)
 
     # Fetch additional pages
     for start in start_values:
@@ -1084,28 +1085,50 @@ def process_and_save_job(job_data):
     job_id = extract_job_id(job_data['original_url'])
 
     if not job_id:
-        return None  # Skip invalid job data
+        return None
 
+    # Check if a job with the same job_id already exists
     existing_job = Job.objects.filter(job_id=job_id).first()
-    print(job_id)
-    if not existing_job:
-        # Create a new job if it doesn't exist
-        Job.objects.create(
-            title=job_data['title'],
-            description=job_data['description'],
-            company_name=job_data['company_name'],
-            location=job_data['location'],
-            salary_range=job_data.get('salary_range'),
-            min_salary=job_data.get('min_salary'),
-            max_salary=job_data.get('max_salary'),
-            employment_type=job_data.get('employment_type', 'full-time'),
-            original_url=job_url_no_query,
-            skills_required=job_data['skills_required'],
-            requirements=job_data['requirements'],
-            benefits=job_data['benefits'],
-            posted_date=job_data.get('posted_date'),
-            job_id=job_id
-        )
+
+    if existing_job:
+        return None  # Skip creating a duplicate job with the same ID
+
+    # Check for jobs with the same title, company_name, and location
+    existing_similar_jobs = Job.objects.filter(
+        title=job_data['title'],
+        company_name=job_data['company_name'],
+        location=job_data['location']
+    )
+
+    if existing_similar_jobs.exists():
+        for similar_job in existing_similar_jobs:
+            # Check if the posted_date matches
+            if similar_job.posted_date == datetime.strptime(job_data['posted_date'], '%Y-%m-%d').date():
+                return None  # Skip creating a duplicate job with the same attributes
+
+            # Check if the new job's posted_date is more recent
+            if job_data.get('posted_date') and similar_job.posted_date:
+                if datetime.strptime(job_data['posted_date'], '%Y-%m-%d').date() > similar_job.posted_date:
+                    # Remove the older job
+                    similar_job.delete()
+
+    # Create a new job if no duplicate or outdated jobs are found
+    Job.objects.create(
+        title=job_data['title'],
+        description=job_data['description'],
+        company_name=job_data['company_name'],
+        location=job_data['location'],
+        salary_range=job_data.get('salary_range'),
+        min_salary=job_data.get('min_salary'),
+        max_salary=job_data.get('max_salary'),
+        employment_type=job_data.get('employment_type', 'full-time'),
+        original_url=job_url_no_query,
+        skills_required=job_data['skills_required'],
+        requirements=job_data['requirements'],
+        benefits=job_data['benefits'],
+        posted_date=job_data.get('posted_date'),
+        job_id=job_id
+    )
 
 
 def construct_similarity_prompt(candidate_profile, jobs_data):

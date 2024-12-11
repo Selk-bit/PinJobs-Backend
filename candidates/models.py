@@ -50,9 +50,26 @@ class CreditOrder(models.Model):
         return f"Order {self.order_id} for {self.credits} credits"
 
 
-class Modele(models.Model):
-    identity = models.CharField(max_length=255, default='reference')
-    template = models.CharField(max_length=255, default='sydney')
+class AbstractTemplate(models.Model):
+    name = models.CharField(max_length=255)
+    reference = models.CharField(max_length=255, blank=True, null=True)
+    image = models.ImageField(upload_to='template_images/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name}"
+
+
+class Template(models.Model):
+    language = models.CharField(max_length=10, choices=[('en', 'English'), ('fr', 'French')], default='en')
+    abstract_template = models.ForeignKey(
+        AbstractTemplate,
+        on_delete=models.CASCADE,
+        related_name="templates",
+        blank=True,
+        null=True,
+    )
     company_logo = models.JSONField(default=dict)
     page = models.JSONField(default=dict)
     certifications = models.JSONField(default=dict)
@@ -69,21 +86,23 @@ class Modele(models.Model):
     personnel = models.JSONField(default=dict)
     typography = models.JSONField(default=dict)
 
-    def __str__(self):
-        return f"Modele for Template {self.template}"
-
-
-class Template(models.Model):
-    name = models.CharField(max_length=255)
-    language = models.CharField(max_length=10, choices=[('en', 'English'), ('fr', 'French')], default='en')
-    reference = models.CharField(max_length=255, blank=True, null=True)
-    templateData = models.OneToOneField(Modele, on_delete=models.CASCADE, related_name='+')
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Template {self.name} in {self.language}"
+        return f"Template {self.abstract_template.name} ({self.language})"
+
+    @property
+    def template(self):
+        return self.abstract_template.name
+
+    @property
+    def reference(self):
+        return self.abstract_template.reference
+
+    @property
+    def identity(self):
+        return self.abstract_template.reference
 
 
 class CV(models.Model):
@@ -101,6 +120,7 @@ class CV(models.Model):
     generated_pdf = models.FileField(upload_to='cvs/pdf/', blank=True, null=True)
     cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
     job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
+    thumbnail = models.ImageField(upload_to='cv_thumbnails/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

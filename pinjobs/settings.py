@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'channels',
     'drf_yasg',
+    'import_export',
 ]
 
 REST_FRAMEWORK = {
