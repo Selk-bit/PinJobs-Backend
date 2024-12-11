@@ -1,26 +1,51 @@
 from django.contrib import admin
-from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Modele, Keyword, Location,
-                     ScrapingSettings, Pack, Price, CreditAction, KeywordLocationCombination, Favorite)
+from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Keyword, Location,
+                     ScrapingSettings, Pack, Price, CreditAction, KeywordLocationCombination, Favorite, AbstractTemplate)
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
-from django_celery_results.models import TaskResult
+from import_export import resources
+from import_export.admin import ImportExportModelAdmin
+from datetime import datetime
 
 
-@admin.register(Modele)
-class ModeleAdmin(admin.ModelAdmin):
-    list_display = ['id', 'identity', 'template']
-    formfield_overrides = {
-        models.JSONField: {'widget': JSONEditorWidget},
-    }
-    search_fields = ['identity', 'template']
-    list_filter = ['template']
+@admin.register(AbstractTemplate)
+class AbstractTemplateAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'reference', 'image', 'created_at', 'updated_at']
+    search_fields = ['name', 'reference']
+    list_filter = ['created_at', 'updated_at']
+    ordering = ['name']
 
 
 @admin.register(Template)
 class TemplateAdmin(admin.ModelAdmin):
-    list_display = ['id', 'name', 'language', 'reference']
-    search_fields = ['name', 'reference', 'language']
-    list_filter = ['language']
+    list_display = [
+        'id', 'language', 'abstract_template', 'created_at', 'updated_at'
+    ]
+    search_fields = ['abstract_template__name', 'abstract_template__reference', 'language']
+    list_filter = ['language', 'created_at', 'updated_at']
+    autocomplete_fields = ['abstract_template']
+    ordering = ['abstract_template__name', 'language']
+    
+    formfield_overrides = {
+        models.JSONField: {'widget': JSONEditorWidget},
+    }
+
+    fieldsets = (
+        (None, {
+            'fields': ('abstract_template', 'language')
+        }),
+        ('Details', {
+            'fields': (
+                'company_logo', 'page', 'certifications', 'education', 'experience',
+                'volunteering', 'interests', 'languages', 'projects', 'references',
+                'skills', 'social', 'theme', 'personnel', 'typography'
+            ),
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+        }),
+    )
+    readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(Candidate)
@@ -41,7 +66,7 @@ class CandidateAdmin(admin.ModelAdmin):
 
 @admin.register(CV)
 class CVAdmin(admin.ModelAdmin):
-    list_display = ('id', 'candidate', 'cv_type', 'created_at', 'updated_at')
+    list_display = ('id', 'candidate', 'cv_type', 'thumbnail', 'created_at', 'updated_at')
     search_fields = ('candidate__first_name', 'candidate__last_name')
 
 
@@ -54,17 +79,69 @@ class CVDataAdmin(admin.ModelAdmin):
     search_fields = ('cv__candidate__first_name', 'cv__candidate__last_name')
 
 
+class JobResource(resources.ModelResource):
+    class Meta:
+        model = Job
+        fields = [
+            'title', 'description', 'requirements', 'company_name',
+            'company_size', 'location', 'linkedin_profiles', 'employment_type',
+            'original_url', 'salary_range', 'min_salary', 'max_salary',
+            'benefits', 'skills_required', 'posted_date', 'expiration_date',
+            'industry', 'job_type'
+        ]
+        export_order = fields
+
+    def import_row(self, row, instance_loader, **kwargs):
+        """
+        Custom import logic:
+        - If a job with the same ID exists, skip it.
+        - If a job with the same title, location, and company_name exists:
+          - Compare posted_date, and if the CSV job's posted_date is more recent,
+            update the existing job with the CSV job's data.
+        """
+        # Check if a job with the same ID exists
+        if Job.objects.filter(job_id=row.get('job_id')).exists():
+            return None  # Skip the row
+
+        # Check if a job with the same title, location, and company_name exists
+        existing_job = Job.objects.filter(
+            title=row.get('title'),
+            company_name=row.get('company_name'),
+            location=row.get('location')
+        ).first()
+
+        if existing_job:
+            # Compare posted_date
+            csv_posted_date = row.get('posted_date')
+            if csv_posted_date and existing_job.posted_date:
+                csv_posted_date = datetime.strptime(csv_posted_date, "%Y-%m-%d").date()
+                if csv_posted_date > existing_job.posted_date:
+                    # Update the existing job with CSV data
+                    for field in self.get_fields():
+                        if field.attribute in row and field.attribute != 'id':  # Skip the ID field
+                            setattr(existing_job, field.attribute, row.get(field.attribute))
+                    existing_job.save()
+            return None  # Skip the row, as it's already handled
+
+        # If no existing job matches, proceed with creating a new job
+        return super().import_row(row, instance_loader, **kwargs)
+
+
 @admin.register(Job)
-class JobAdmin(admin.ModelAdmin):
+class JobAdmin(ImportExportModelAdmin):
     list_display = ('id', 'title', 'company_name', 'location', 'employment_type', 'job_type', 'posted_date')
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }
     search_fields = ('title', 'company_name', 'location')
 
+    def has_import_permission(self, request):
+        return True
+
 
 @admin.register(JobSearch)
 class JobSearchAdmin(admin.ModelAdmin):
+    resource_class = JobResource
     list_display = ('job', 'candidate', 'similarity_score', 'search_date')
     search_fields = ('candidate__first_name', 'job__title')
 
