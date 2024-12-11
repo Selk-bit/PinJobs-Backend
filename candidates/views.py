@@ -1380,7 +1380,6 @@ class TemplateDetailView(APIView):
                 'theme': templateData.get('theme', {}),
                 'personnel': templateData.get('personnel', {}),
                 'typography': templateData.get('typography', {}),
-                'thumbnail': templateData.get('thumbnail', None),
             }
         )
 
@@ -1952,7 +1951,6 @@ class UserTemplateView(APIView):
                 'theme': templateData.get('theme', {}),
                 'personnel': templateData.get('personnel', {}),
                 'typography': templateData.get('typography', {}),
-                'thumbnail': templateData.get('thumbnail', None),
             }
         )
 
