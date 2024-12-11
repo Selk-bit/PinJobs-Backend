@@ -90,7 +90,7 @@ class Template(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Template {self.abstract_template.name} ({self.language})"
+        return f"Template({self.language})"
 
     @property
     def template(self):
