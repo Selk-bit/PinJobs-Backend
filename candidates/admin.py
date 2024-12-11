@@ -69,6 +69,18 @@ class CVAdmin(admin.ModelAdmin):
     list_display = ('id', 'candidate', 'cv_type', 'thumbnail', 'created_at', 'updated_at')
     search_fields = ('candidate__first_name', 'candidate__last_name')
 
+    def delete_model(self, request, obj):
+        if obj.template:
+            obj.template.delete()
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        # Iterate through the queryset to delete associated templates
+        for cv in queryset:
+            if cv.template:
+                cv.template.delete()  # Delete the associated template
+        super().delete_queryset(request, queryset)
+
 
 @admin.register(CVData)
 class CVDataAdmin(admin.ModelAdmin):
