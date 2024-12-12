@@ -45,8 +45,5 @@ urlpatterns = [
     path('credits/create-order/', TopUpView.as_view(), name='top-up'),
     path('credits/confirm-order/', TopUpConfirmView.as_view(), name='top-up-confirm'),
     path('credits/prices/', PackPricesView.as_view(), name='top-up-confirm'),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
