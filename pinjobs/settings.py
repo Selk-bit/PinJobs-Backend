@@ -17,7 +17,9 @@ from datetime import timedelta
 from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media').replace('\\', '/')
+MEDIA_URL = '/media/'
 load_dotenv()
 EXTERNAL_API_URL = os.getenv('EXTERNAL_API_URL')
 PROXYCURL_API_KEY = os.getenv('PROXYCURL_API_KEY')
@@ -83,7 +85,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
@@ -102,6 +103,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'django.template.context_processors.media',
             ],
         },
     },
@@ -125,15 +127,25 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 #     }
 # }
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.mysql',
+#         'OPTIONS': {'charset': 'utf8mb4'},
+#         'NAME': 'pinjobs',  # Replace with your database name
+#         'USER': 'salim',  # Replace with your database username
+#         'PASSWORD': 'salim',  # Replace with your database password
+#         'HOST': 'mysql-mq46',  # Replace if your MySQL server is hosted elsewhere
+#         'PORT': '3306',  # Default MySQL port
+#     }
+# }
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'OPTIONS': {'charset': 'utf8mb4'},
-        'NAME': 'pinjobs',  # Replace with your database name
-        'USER': 'salim',  # Replace with your database username
-        'PASSWORD': 'salim',  # Replace with your database password
-        'HOST': 'mysql-mq46',  # Replace if your MySQL server is hosted elsewhere
-        'PORT': '3306',  # Default MySQL port
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'pinjobs_db',  # Replace with your PostgreSQL database name
+        'USER': 'pinjobs_db_user',    # Replace with your PostgreSQL username
+        'PASSWORD': 'CZ48By3MvLqZOXkytL4iFE8pYX3y9SLL', # Replace with your PostgreSQL password
+        'HOST': 'dpg-ctdko2qlqhvc73d6r57g-a', # Replace with your PostgreSQL host
+        'PORT': '5432',      # Default PostgreSQL port
     }
 }
 os.environ["PATH"] += os.pathsep + os.path.join(os.getenv("HOME"), "bin")
@@ -226,3 +238,4 @@ SWAGGER_SETTINGS = {
     },
     'USE_SESSION_AUTH': False,
 }
+
