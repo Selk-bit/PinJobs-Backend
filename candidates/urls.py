@@ -7,8 +7,6 @@ from .views import (
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView
 )
 from django.contrib.auth import views as auth_views
-from django.conf.urls.static import static
-from django.conf import settings
 
 urlpatterns = [
     path('auth/signup/', SignUpView.as_view(), name='signup'),
@@ -45,5 +43,5 @@ urlpatterns = [
     path('credits/create-order/', TopUpView.as_view(), name='top-up'),
     path('credits/confirm-order/', TopUpConfirmView.as_view(), name='top-up-confirm'),
     path('credits/prices/', PackPricesView.as_view(), name='top-up-confirm'),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]
 
