@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
                      Price, Pack, AbstractTemplate)
 from django.contrib.auth.models import User
+from rest_framework.response import Response
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -86,19 +87,52 @@ class CVDataSerializer(serializers.ModelSerializer):
 
 
 class JobSerializer(serializers.ModelSerializer):
+    similarity_score = serializers.SerializerMethodField()
+
     class Meta:
         model = Job
-        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type"]
+        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score"]
+
+    def get_similarity_score(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            candidate = getattr(request.user, 'candidate', None)
+            if candidate:
+                job_search = JobSearch.objects.filter(job=obj, candidate=candidate).first()
+                if job_search:
+                    return job_search.similarity_score
+        return None
 
 
 class CVSerializer(serializers.ModelSerializer):
     job = JobSerializer()
     cv_data = CVDataSerializer()
     thumbnail = serializers.ImageField(read_only=True)
+    name = serializers.SerializerMethodField()
+    template = serializers.SerializerMethodField()
 
     class Meta:
         model = CV
-        fields = ['id', 'candidate', 'original_file', 'generated_pdf', 'thumbnail', 'cv_data', 'job', 'created_at', 'updated_at']
+        fields = ['id', "name", 'original_file', 'generated_pdf', 'thumbnail', 'cv_data', 'job', 'template', 'created_at', 'updated_at']
+
+    def get_name(self, obj):
+        if obj.cv_type == CV.BASE:
+            # For base CVs, use cv_data title
+            title = obj.cv_data.title if obj.cv_data and obj.cv_data.title else "Untitled"
+            return f"{title} - Base CV"
+        elif obj.cv_type == CV.TAILORED:
+            # For tailored CVs, use job title and company name
+            if obj.job:
+                job_title = obj.job.title if obj.job.title else "Untitled Job"
+                company_name = obj.job.company_name if obj.job.company_name else "Unknown Company"
+                return f"{job_title} - {company_name}"
+        return "Untitled"
+
+    def get_template(self, obj):
+        # Serialize the associated template, if it exists
+        if obj.template:
+            return TemplateSerializer(obj.template).data
+        return None
 
 
 class JobSearchSerializer(serializers.ModelSerializer):

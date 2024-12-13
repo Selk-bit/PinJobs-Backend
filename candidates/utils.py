@@ -707,7 +707,6 @@ def fetch_job_description(url, max_retries=100):
         }
         try:
             job_detail_url = construct_job_detail_url(url)
-            print(job_detail_url)
             response = requests.get(job_detail_url, headers=headers)
 
             if response.status_code == 200:
