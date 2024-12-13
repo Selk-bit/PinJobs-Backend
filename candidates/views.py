@@ -220,14 +220,14 @@ class CandidateJobsView(APIView):
 
         # Get all JobSearches for the candidate
         job_searches = JobSearch.objects.filter(candidate=candidate)
-        job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
+        # job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
 
         # Serialize jobs with similarity score
         results = []
         for job in jobs:
-            job_data = JobSerializer(job).data
+            job_data = JobSerializer(job, context={'request': request}).data
             # Add similarity score if the candidate has a JobSearch for the job
-            job_data['similarity_score'] = job_search_map.get(job.id, None)
+            # job_data['similarity_score'] = job_search_map.get(job.id, None)
             results.append(job_data)
 
         # Apply pagination
@@ -263,14 +263,14 @@ class CandidateFavoriteJobsView(APIView):
 
         # Get all JobSearches for the candidate
         job_searches = JobSearch.objects.filter(candidate=candidate)
-        job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
+        # job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
 
         # Serialize jobs with similarity score
         results = []
         for job in jobs:
-            job_data = JobSerializer(job).data
+            job_data = JobSerializer(job, context={'request': request}).data
             # Add similarity score if the candidate has a JobSearch for the job
-            job_data['similarity_score'] = job_search_map.get(job.id, None)
+            # job_data['similarity_score'] = job_search_map.get(job.id, None)
             results.append(job_data)
 
         # Apply pagination
@@ -586,8 +586,8 @@ class CVDataView(APIView):
         # Retrieve the CVData for the candidate's base CV
         try:
             base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
-            cv_data = base_cv.cv_data  # Access the related CVData
-            serializer = CVDataSerializer(cv_data)
+            # cv_data = base_cv.cv_data
+            serializer = CVSerializer(base_cv)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except CV.DoesNotExist:
             return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
@@ -1261,10 +1261,8 @@ class JobDescriptionCVView(APIView):
         try:
             gemini_response = get_gemini_response(prompt)
             gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-            print(gemini_response)
             gemini_data = json.loads(gemini_response)
         except Exception as e:
-            print(e)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if cv_data_instance:
@@ -1589,43 +1587,10 @@ class TailoredCVView(APIView):
         try:
             # Retrieve the tailored CV
             tailored_cv = CV.objects.get(id=id, candidate=candidate, cv_type=CV.TAILORED)
-            serializer = CVSerializer(tailored_cv)
+            serializer = CVSerializer(tailored_cv, context={'request': request})
             return Response(serializer.data, status=status.HTTP_200_OK)
         except CV.DoesNotExist:
             return Response({"error": "Tailored CV not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    @swagger_auto_schema(
-        operation_description="Create a new tailored CV.",
-        request_body=CVDataSerializer,
-        responses={
-            201: CVSerializer(),
-            400: openapi.Response(description="Bad Request"),
-            403: openapi.Response(description="A tailored CV for this job already exists."),
-        }
-    )
-    def post(self, request):
-        candidate = request.user.candidate
-        job_id = request.data.get("job_id")
-
-        if not job_id:
-            return Response({"error": "Job ID is required to create a tailored CV."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if a tailored CV for this job already exists
-        if CV.objects.filter(candidate=candidate, cv_type=CV.TAILORED, job_id=job_id).exists():
-            return Response({"error": "A tailored CV for this job already exists."}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            # Ensure the job exists
-            job = Job.objects.get(id=job_id)
-        except Job.DoesNotExist:
-            return Response({"error": "The specified job does not exist."}, status=status.HTTP_404_NOT_FOUND)
-
-        # Create a new tailored CV and associated CVData
-        tailored_cv = CV.objects.create(candidate=candidate, cv_type=CV.TAILORED, job=job)
-        cv_data = CVData.objects.create(cv=tailored_cv)
-
-        serializer = CVSerializer(tailored_cv)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @swagger_auto_schema(
         operation_description="Update a tailored CV's data.",
@@ -1749,10 +1714,10 @@ class CandidateTailoredCVsView(ListAPIView):
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         if page is not None:
-            serializer = CVSerializer(page, many=True)
+            serializer = CVSerializer(page, many=True, context={'request': request})
             return self.get_paginated_response(serializer.data)
 
-        serializer = CVSerializer(queryset, many=True)
+        serializer = CVSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
     @swagger_auto_schema(
@@ -1778,7 +1743,7 @@ class CandidateTailoredCVsView(ListAPIView):
         serializer.save(cv=tailored_cv)
 
         # Serialize the response
-        tailored_cv_serializer = CVSerializer(tailored_cv)
+        tailored_cv_serializer = CVSerializer(tailored_cv, context={'request': request})
         return Response(tailored_cv_serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -2037,19 +2002,10 @@ class CVDetailView(APIView):
             # Retrieve the CV by ID
             cv = CV.objects.get(id=id, candidate=request.user.candidate)
 
-            # Serialize the CV and its data
-            cv_serializer = CVSerializer(cv)
+            # Serialize the CV, including template and other data
+            serializer = CVSerializer(cv, context={'request': request})
 
-            # Serialize the associated template, if it exists
-            template_serializer = None
-            if cv.template:
-                template_serializer = TemplateSerializer(cv.template)
-
-            # Construct the response data
-            response_data = cv_serializer.data
-            response_data['template'] = template_serializer.data if template_serializer else None
-
-            return Response(response_data, status=status.HTTP_200_OK)
+            return Response(serializer.data, status=status.HTTP_200_OK)
 
         except CV.DoesNotExist:
             return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
