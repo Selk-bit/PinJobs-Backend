@@ -19,13 +19,13 @@ class AbstractTemplateAdmin(admin.ModelAdmin):
 @admin.register(Template)
 class TemplateAdmin(admin.ModelAdmin):
     list_display = [
-        'id', 'language', 'abstract_template', 'created_at', 'updated_at'
+        'id', 'language', 'abstract_template', 'get_cv', 'created_at', 'updated_at'
     ]
     search_fields = ['abstract_template__name', 'abstract_template__reference', 'language']
     list_filter = ['language', 'created_at', 'updated_at']
     autocomplete_fields = ['abstract_template']
     ordering = ['abstract_template__name', 'language']
-    
+
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }
@@ -46,6 +46,14 @@ class TemplateAdmin(admin.ModelAdmin):
         }),
     )
     readonly_fields = ['created_at', 'updated_at']
+
+    def get_cv(self, obj):
+        """Display the associated CV ID."""
+        if hasattr(obj, 'cv'):
+            return obj.cv.id  # Display the CV ID or any field you prefer
+        return "No CV"
+
+    get_cv.short_description = "CV ID"
 
 
 @admin.register(Candidate)

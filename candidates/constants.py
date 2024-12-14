@@ -23,3 +23,52 @@ POPULAR_WEBSITES = [
     "https://www.bbc.com",
 ]
 BATCH_SIZE = 5
+DEFAULT_TEMPLATE_DATA = {
+    'language': 'fr',
+    'company_logo': {
+        'url': '',
+        'border': False,
+        'hidden': False,
+        'grayscale': False,
+        'size': 90,
+        'aspectRatio': 1,
+        'borderRadius': 50,
+    },
+    'page': {
+        'margin': 12,
+        'format': 'a4',
+        'headline': True,
+        'summary': True,
+        'breakLine': False,
+        'pageNumbers': False,
+    },
+    'certifications': {'name': 'Certifications', 'visible': True},
+    'education': {'name': 'Education', 'visible': True},
+    'experience': {'name': 'Experience', 'visible': True},
+    'volunteering': {'name': 'Volunteering', 'visible': True},
+    'interests': {'name': 'Interests', 'visible': True},
+    'languages': {'name': 'Languages', 'visible': True},
+    'projects': {'name': 'Projects', 'visible': True},
+    'references': {'name': 'References', 'visible': True},
+    'skills': {'name': 'Skills', 'visible': True},
+    'social': {'name': 'Social Profiles', 'visible': True},
+    'theme': {
+        'background': '#fff',
+        'text': '#2C3E50',
+        'primary': '#16A085',
+    },
+    'personnel': {
+        'name': True,
+        'phone': True,
+        'city': True,
+        'age': True,
+        'email': True,
+    },
+    'typography': {
+        'family': 'open-sans',
+        'size': 16,
+        'lineHeight': 2,
+        'hideIcons': False,
+        'underlineLinks': False,
+    },
+}
