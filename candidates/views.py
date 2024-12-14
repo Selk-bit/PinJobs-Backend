@@ -2185,7 +2185,7 @@ class CandidateCVsView(ListAPIView):
     def get_queryset(self):
         # Retrieve only tailored CVs for the authenticated candidate
         candidate = self.request.user.candidate
-        return CV.objects.filter(candidate=candidate, cv_type=CV.TAILORED).select_related("cv_data", "job")
+        return CV.objects.filter(candidate=candidate).select_related("cv_data", "job")
 
     @swagger_auto_schema(
         operation_description="Retrieve a list of tailored CVs for the authenticated user.",
