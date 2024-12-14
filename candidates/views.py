@@ -2175,7 +2175,7 @@ class CandidateTailoredCVsPagination(PageNumberPagination):
     max_page_size = 50
 
 
-class CandidateTailoredCVsView(ListAPIView):
+class CandidateCVsView(ListAPIView):
     permission_classes = [IsAuthenticated]
     pagination_class = CandidateTailoredCVsPagination
     filter_backends = [DjangoFilterBackend]
@@ -2213,32 +2213,6 @@ class CandidateTailoredCVsView(ListAPIView):
 
         serializer = CVSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
-
-    @swagger_auto_schema(
-        operation_description="Create a new tailored CV without associating it with a job.",
-        request_body=CVDataSerializer,
-        responses={
-            201: CVSerializer(),
-            400: openapi.Response(description="Bad Request"),
-        }
-    )
-    def post(self, request):
-        candidate = request.user.candidate
-
-        # Validate the provided CVData
-        serializer = CVDataSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        # Create a new tailored CV
-        tailored_cv = CV.objects.create(candidate=candidate, cv_type=CV.TAILORED, job=None)
-
-        # Create CVData linked to the newly created CV
-        serializer.save(cv=tailored_cv)
-
-        # Serialize the response
-        tailored_cv_serializer = CVSerializer(tailored_cv, context={'request': request})
-        return Response(tailored_cv_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class RemoveFavoriteView(APIView):

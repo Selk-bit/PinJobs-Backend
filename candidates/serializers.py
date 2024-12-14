@@ -113,7 +113,7 @@ class CVSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CV
-        fields = ['id', "name", 'original_file', 'generated_pdf', 'thumbnail', 'cv_data', 'job', 'template', 'created_at', 'updated_at']
+        fields = ['id', "name", 'original_file', 'cv_type', 'generated_pdf', 'thumbnail', 'cv_data', 'job', 'template', 'created_at', 'updated_at']
 
     def get_name(self, obj):
         if obj.cv_type == CV.BASE:
