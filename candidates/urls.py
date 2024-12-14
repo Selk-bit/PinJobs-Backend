@@ -3,7 +3,7 @@ from .views import (
     SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView, LogoutView, ChangePasswordView,
     CandidateJobsView, CVDataView, TemplateDetailView, TopUpView, TopUpConfirmView,
     JobLinkCVView, TailoredCVView, ExistingJobCVView, UserTemplateView,
-    CandidateTailoredCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView,
+    CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView,
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView
 )
 from django.contrib.auth import views as auth_views
@@ -25,7 +25,8 @@ urlpatterns = [
     path('cvs/base/linkedin/', LinkedInCVView.as_view(), name='linkedin_cv'),
     path('cvs/base/', CVDataView.as_view(), name='cv-data'),
     path('cvs/base/template/', UserTemplateView.as_view(), name='user-template'),
-    path('cvs/tailored/', CandidateTailoredCVsView.as_view(), name='candidate-tailored-cvs'),
+    # path('cvs/tailored/', CandidateTailoredCVsView.as_view(), name='candidate-tailored-cvs'),
+    path('cvs/', CandidateCVsView.as_view(), name='candidate-tailored-cvs'),
     path('cvs/tailored/<int:id>/', TailoredCVView.as_view(), name='update_tailored_cv'),
     path('cvs/tailored/job-description/', JobDescriptionCVView.as_view(), name='job_description_cv'),
     path('cvs/tailored/job-link/', JobLinkCVView.as_view(), name='job_link_cv'),
