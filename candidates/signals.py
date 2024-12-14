@@ -1,6 +1,7 @@
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from .models import Keyword, Location, KeywordLocationCombination, CV, CVData
+from .models import Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate
+from .constants import DEFAULT_TEMPLATE_DATA
 
 
 @receiver(post_save, sender=Keyword)
@@ -21,3 +22,43 @@ def create_combinations_for_new_location(sender, instance, **kwargs):
 def enforce_single_base_cv(sender, instance, **kwargs):
     if instance.cv_type == CV.BASE:
         CV.objects.filter(candidate=instance.candidate, cv_type=CV.BASE).exclude(id=instance.id).delete()
+
+
+@receiver(post_save, sender=CV)
+def create_default_template(sender, instance, created, **kwargs):
+    """
+    Signal to create a default template for newly created CVs if none exists,
+    and only if the abstract template "sydney" is available.
+    """
+    if created and not instance.template:
+        try:
+            # Retrieve the abstract template "sydney"
+            abstract_template = AbstractTemplate.objects.get(name="sydney")
+        except AbstractTemplate.DoesNotExist:
+            # If "sydney" does not exist, do nothing
+            return
+
+        # Create the default template
+        template = Template.objects.create(
+            abstract_template=abstract_template,
+            language=DEFAULT_TEMPLATE_DATA['language'],
+            company_logo=DEFAULT_TEMPLATE_DATA['company_logo'],
+            page=DEFAULT_TEMPLATE_DATA['page'],
+            certifications=DEFAULT_TEMPLATE_DATA['certifications'],
+            education=DEFAULT_TEMPLATE_DATA['education'],
+            experience=DEFAULT_TEMPLATE_DATA['experience'],
+            volunteering=DEFAULT_TEMPLATE_DATA['volunteering'],
+            interests=DEFAULT_TEMPLATE_DATA['interests'],
+            languages=DEFAULT_TEMPLATE_DATA['languages'],
+            projects=DEFAULT_TEMPLATE_DATA['projects'],
+            references=DEFAULT_TEMPLATE_DATA['references'],
+            skills=DEFAULT_TEMPLATE_DATA['skills'],
+            social=DEFAULT_TEMPLATE_DATA['social'],
+            theme=DEFAULT_TEMPLATE_DATA['theme'],
+            personnel=DEFAULT_TEMPLATE_DATA['personnel'],
+            typography=DEFAULT_TEMPLATE_DATA['typography'],
+        )
+
+        # Associate the template with the CV
+        instance.template = template
+        instance.save()

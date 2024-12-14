@@ -1072,9 +1072,9 @@ class UploadCVView(APIView):
                 )
 
                 # Serialize data and remove "id" and "cv" fields
-                serialized_data = CVDataSerializer(cv_data).data
-                serialized_data.pop('id', None)
-                serialized_data.pop('cv', None)
+                serialized_data = CVSerializer(cv, context={'request': request}).data
+                # serialized_data.pop('id', None)
+                # serialized_data.pop('cv', None)
                 # response_data.append(serialized_data)
 
                 deduct_credits(candidate, 'upload_cv')
@@ -1235,9 +1235,9 @@ class LinkedInCVView(APIView):
             deduct_credits(candidate, 'upload_linkedin_profile')
 
             # Serialize and return the CVData response
-            serialized_data = CVDataSerializer(cv_data).data
-            serialized_data.pop('id', None)
-            serialized_data.pop('cv', None)
+            serialized_data = CVSerializer(cv, context={'request': request}).data
+            # serialized_data.pop('id', None)
+            # serialized_data.pop('cv', None)
 
             return Response(serialized_data, status=status.HTTP_201_CREATED)
         else:
@@ -1374,7 +1374,7 @@ class JobLinkCVView(APIView):
         if serializer.is_valid():
             serializer.save()
             deduct_credits(candidate, 'tailor_job_from_link')
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(CVSerializer(tailored_cv, context={'request': request}).data, status=status.HTTP_200_OK)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1476,7 +1476,7 @@ class ExistingJobCVView(APIView):
         if serializer.is_valid():
             serializer.save()
             deduct_credits(candidate, 'tailor_job_from_existing')
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(CVSerializer(tailored_cv, context={'request': request}).data, status=status.HTTP_200_OK)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

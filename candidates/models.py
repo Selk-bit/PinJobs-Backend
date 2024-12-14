@@ -184,7 +184,7 @@ class Job(models.Model):
         blank=True,
         null=True
     )
-    original_url = models.CharField(max_length=255)
+    original_url = models.CharField(max_length=1000)
 
     salary_range = models.CharField(max_length=100, blank=True, null=True)
     min_salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
