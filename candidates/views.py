@@ -2183,12 +2183,12 @@ class CandidateCVsView(ListAPIView):
     serializer_class = CVSerializer
 
     def get_queryset(self):
-        # Retrieve only tailored CVs for the authenticated candidate
+        # Retrieve all CVs for the authenticated candidate
         candidate = self.request.user.candidate
         return CV.objects.filter(candidate=candidate).select_related("cv_data", "job")
 
     @swagger_auto_schema(
-        operation_description="Retrieve a list of tailored CVs for the authenticated user.",
+        operation_description="Retrieve a list of CVs for the authenticated user, with the base CV always appearing first.",
         manual_parameters=[
             openapi.Parameter('job_title', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job title'),
             openapi.Parameter('job_location', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job location'),
@@ -2205,7 +2205,22 @@ class CandidateCVsView(ListAPIView):
         security=[{'Bearer': []}],
     )
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
+        candidate = self.request.user.candidate
+
+        # Retrieve the base CV
+        try:
+            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+        except CV.DoesNotExist:
+            base_cv = None
+
+        # Apply filters to the remaining CVs (excluding the base CV)
+        queryset = self.filter_queryset(self.get_queryset().exclude(id=base_cv.id if base_cv else None))
+
+        # Combine base CV with the filtered queryset
+        if base_cv:
+            queryset = [base_cv] + list(queryset)
+
+        # Paginate the combined queryset
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = CVSerializer(page, many=True, context={'request': request})
@@ -2458,6 +2473,11 @@ class AbstractTemplateListView(APIView):
 class CVDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return []  # No authentication required for GET requests
+        return [permission() for permission in self.permission_classes]
+
     @swagger_auto_schema(
         operation_description="Retrieve a CV along with its data and template.",
         responses={
@@ -2468,7 +2488,7 @@ class CVDetailView(APIView):
     def get(self, request, id):
         try:
             # Retrieve the CV by ID
-            cv = CV.objects.get(id=id, candidate=request.user.candidate)
+            cv = CV.objects.get(id=id)
 
             # Serialize the CV, including template and other data
             serializer = CVSerializer(cv, context={'request': request})
@@ -2731,3 +2751,27 @@ class CVDetailView(APIView):
             cv.save()
 
         return Response(CVSerializer(cv, context={"request": request}).data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_description="Delete a CV by ID, including its associated template if present.",
+        responses={
+            204: openapi.Response(description="CV deleted successfully."),
+            404: openapi.Response(description="CV not found."),
+        },
+    )
+    def delete(self, request, id):
+        try:
+            # Retrieve the CV by ID
+            cv = CV.objects.get(id=id, candidate=request.user.candidate)
+
+            # Delete associated Template if it exists
+            if cv.template:
+                cv.template.delete()
+
+            # Delete the CV
+            cv.delete()
+
+            return Response({"detail": "CV deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+        except CV.DoesNotExist:
+            return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
