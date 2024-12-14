@@ -595,36 +595,324 @@ class CVDataView(APIView):
             return Response({"error": "CVData not found for the base CV"}, status=status.HTTP_404_NOT_FOUND)
 
     @swagger_auto_schema(
-        operation_description="Update or create the CV data for the authenticated user.",
-        request_body=CVDataSerializer,
-        responses={200: CVDataSerializer(), 400: openapi.Response(description='Bad Request')}
+        operation_description="Update the CV data and template for the authenticated user.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="The CV data fields.",
+                    properties={
+                        "title": openapi.Schema(type=openapi.TYPE_STRING, description="CV title"),
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's name"),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's email"),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's phone number"),
+                        "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Candidate's age"),
+                        "city": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's city"),
+                        "work": openapi.Schema(type=openapi.TYPE_OBJECT, description="Work experience details"),
+                        "educations": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education details"),
+                        "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages known"),
+                        "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills"),
+                        "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests"),
+                        "social": openapi.Schema(type=openapi.TYPE_OBJECT, description="Social profiles"),
+                        "certifications": openapi.Schema(type=openapi.TYPE_OBJECT, description="Certifications"),
+                        "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects"),
+                        "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                       description="Volunteering experiences"),
+                        "references": openapi.Schema(type=openapi.TYPE_OBJECT, description="References"),
+                        "headline": openapi.Schema(type=openapi.TYPE_STRING, description="Professional headline"),
+                        "summary": openapi.Schema(type=openapi.TYPE_STRING, description="Summary or bio"),
+                    },
+                ),
+                "template": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="Template data fields.",
+                    properties={
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                        "reference": openapi.Schema(type=openapi.TYPE_STRING, description="Template reference."),
+                        "language": openapi.Schema(type=openapi.TYPE_STRING, description="Template language."),
+                        "templateData": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="The nested template data structure.",
+                            properties={
+                                "identity": openapi.Schema(type=openapi.TYPE_STRING, description="Template identity."),
+                                "template": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                                "company_logo": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Company logo details."),
+                                "page": openapi.Schema(type=openapi.TYPE_OBJECT, description="Page layout details."),
+                                "certifications": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                                 description="Certifications layout."),
+                                "education": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education layout."),
+                                "experience": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Experience layout."),
+                                "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Volunteering layout."),
+                                "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests layout."),
+                                "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages layout."),
+                                "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects layout."),
+                                "references": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="References layout."),
+                                "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills layout."),
+                                "social": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                         description="Social profiles layout."),
+                                "theme": openapi.Schema(type=openapi.TYPE_OBJECT, description="Theme settings."),
+                                "personnel": openapi.Schema(type=openapi.TYPE_OBJECT, description="Personnel layout."),
+                                "typography": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Typography settings."),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+        responses={
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="Base CV or AbstractTemplate not found."),
+        },
     )
     def put(self, request):
-        # Update or create CV data
         candidate = request.user.candidate
-        cv, _ = CV.objects.get_or_create(candidate=candidate, cv_type=CV.BASE)
-        cv_data, _ = CVData.objects.get_or_create(cv=cv)
-        serializer = CVDataSerializer(cv_data, data=request.data, partial=False)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Retrieve or create the base CV
+        try:
+            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+        except CV.DoesNotExist:
+            return Response({"error": "Base CV not found for the candidate."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update CV Data
+        try:
+            cv_data = CVData.objects.get(cv=cv)
+        except CVData.DoesNotExist:
+            cv_data = CVData(cv=cv)
+
+        cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=False)
+        if not cv_data_serializer.is_valid():
+            return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        cv_data_serializer.save()
+
+        # Update Template
+        template_data = request.data.get("template")
+        if template_data:
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template, created = Template.objects.update_or_create(
+                id=cv.template.id if cv.template else None,
+                defaults={
+                    'abstract_template': abstract_template,
+                    'language': template_data.get('language', 'en'),
+                    **template_data.get("templateData", {})
+                }
+            )
+
+            cv.template = template
+            cv.save()
+
+        return Response(CVSerializer(cv).data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
-        operation_description="Partially update the CV data for the authenticated user.",
-        request_body=CVDataSerializer,
-        responses={200: CVDataSerializer(), 400: openapi.Response(description='Bad Request')}
+        operation_description="Partially Update the CV data and template for the authenticated user.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="The CV data fields.",
+                    properties={
+                        "title": openapi.Schema(type=openapi.TYPE_STRING, description="CV title"),
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's name"),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's email"),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's phone number"),
+                        "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Candidate's age"),
+                        "city": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's city"),
+                        "work": openapi.Schema(type=openapi.TYPE_OBJECT, description="Work experience details"),
+                        "educations": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education details"),
+                        "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages known"),
+                        "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills"),
+                        "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests"),
+                        "social": openapi.Schema(type=openapi.TYPE_OBJECT, description="Social profiles"),
+                        "certifications": openapi.Schema(type=openapi.TYPE_OBJECT, description="Certifications"),
+                        "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects"),
+                        "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                       description="Volunteering experiences"),
+                        "references": openapi.Schema(type=openapi.TYPE_OBJECT, description="References"),
+                        "headline": openapi.Schema(type=openapi.TYPE_STRING, description="Professional headline"),
+                        "summary": openapi.Schema(type=openapi.TYPE_STRING, description="Summary or bio"),
+                    },
+                ),
+                "template": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="Template data fields.",
+                    properties={
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                        "reference": openapi.Schema(type=openapi.TYPE_STRING, description="Template reference."),
+                        "language": openapi.Schema(type=openapi.TYPE_STRING, description="Template language."),
+                        "templateData": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="The nested template data structure.",
+                            properties={
+                                "identity": openapi.Schema(type=openapi.TYPE_STRING, description="Template identity."),
+                                "template": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                                "company_logo": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Company logo details."),
+                                "page": openapi.Schema(type=openapi.TYPE_OBJECT, description="Page layout details."),
+                                "certifications": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                                 description="Certifications layout."),
+                                "education": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education layout."),
+                                "experience": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Experience layout."),
+                                "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Volunteering layout."),
+                                "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests layout."),
+                                "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages layout."),
+                                "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects layout."),
+                                "references": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="References layout."),
+                                "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills layout."),
+                                "social": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                         description="Social profiles layout."),
+                                "theme": openapi.Schema(type=openapi.TYPE_OBJECT, description="Theme settings."),
+                                "personnel": openapi.Schema(type=openapi.TYPE_OBJECT, description="Personnel layout."),
+                                "typography": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Typography settings."),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+        responses={
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="Base CV or AbstractTemplate not found."),
+        },
     )
     def patch(self, request):
-        # Partially update CV data
         candidate = request.user.candidate
-        cv, _ = CV.objects.get_or_create(candidate=candidate, cv_type=CV.BASE)
-        cv_data, _ = CVData.objects.get_or_create(cv=cv)
-        serializer = CVDataSerializer(cv_data, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Retrieve or create the base CV
+        try:
+            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+        except CV.DoesNotExist:
+            return Response({"error": "Base CV not found for the candidate."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update CV Data
+        try:
+            cv_data = CVData.objects.get(cv=cv)
+        except CVData.DoesNotExist:
+            cv_data = CVData(cv=cv)
+
+        cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=True)
+        if not cv_data_serializer.is_valid():
+            return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        cv_data_serializer.save()
+
+        # Update Template
+        template_data = request.data.get("template")
+        if template_data:
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template, created = Template.objects.update_or_create(
+                id=cv.template.id if cv.template else None,
+                defaults={
+                    'abstract_template': abstract_template,
+                    'language': template_data.get('language', 'en'),
+                    **template_data.get("templateData", {})
+                }
+            )
+
+            cv.template = template
+            cv.save()
+
+        return Response(CVSerializer(cv).data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_description="Delete the current CV data and template, and create new ones for the authenticated user's base CV.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(type=openapi.TYPE_OBJECT, description="CV data fields."),
+                "template": openapi.Schema(type=openapi.TYPE_OBJECT, description="Template data fields."),
+            },
+        ),
+        responses={
+            201: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="Base CV or AbstractTemplate not found."),
+        },
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+
+        # Retrieve or create the base CV
+        try:
+            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+
+            # Delete existing CV Data and Template
+            if hasattr(cv, "cv_data"):
+                cv.cv_data.delete()
+            if cv.template:
+                cv.template.delete()
+        except CV.DoesNotExist:
+            return Response({"error": "Base CV not found for the candidate."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Create new CV Data
+        cv_data_serializer = CVDataSerializer(data=request.data.get("cv_data"))
+        if not cv_data_serializer.is_valid():
+            return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        cv_data = cv_data_serializer.save(cv=cv)
+
+        # Create new Template
+        template_data = request.data.get("template")
+        if template_data:
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template = Template.objects.create(
+                abstract_template=abstract_template,
+                language=template_data.get('language', 'en'),
+                **template_data.get("templateData", {})
+            )
+
+            cv.template = template
+            cv.save()
+
+        return Response(CVSerializer(cv).data, status=status.HTTP_201_CREATED)
 
     @swagger_auto_schema(
         operation_description="Delete the CV data and its associated template for the authenticated user's base CV.",
@@ -647,29 +935,6 @@ class CVDataView(APIView):
             base_cv.delete()
 
             return Response(status=status.HTTP_204_NO_CONTENT)
-        except CV.DoesNotExist:
-            return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
-    @swagger_auto_schema(
-        operation_description="Delete the current CV data for the authenticated user's base CV and create a new one.",
-        request_body=CVDataSerializer,
-        responses={201: CVDataSerializer(), 400: openapi.Response(description="Bad Request")}
-    )
-    def post(self, request):
-        # Delete and recreate CV data
-        candidate = request.user.candidate
-        try:
-            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
-            # Delete existing CVData
-            if hasattr(base_cv, 'cv_data'):
-                base_cv.cv_data.delete()
-
-            # Create new CVData
-            new_cv_data = CVData(cv=base_cv)
-            serializer = CVDataSerializer(new_cv_data, data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except CV.DoesNotExist:
             return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1593,13 +1858,81 @@ class TailoredCVView(APIView):
             return Response({"error": "Tailored CV not found."}, status=status.HTTP_404_NOT_FOUND)
 
     @swagger_auto_schema(
-        operation_description="Update a tailored CV's data.",
-        request_body=CVDataSerializer,
+        operation_description="Update a tailored CV's data and template.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="The CV data fields.",
+                    properties={
+                        "title": openapi.Schema(type=openapi.TYPE_STRING, description="CV title"),
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's name"),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's email"),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's phone number"),
+                        "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Candidate's age"),
+                        "city": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's city"),
+                        "work": openapi.Schema(type=openapi.TYPE_OBJECT, description="Work experience details"),
+                        "educations": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education details"),
+                        "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages known"),
+                        "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills"),
+                        "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests"),
+                        "social": openapi.Schema(type=openapi.TYPE_OBJECT, description="Social profiles"),
+                        "certifications": openapi.Schema(type=openapi.TYPE_OBJECT, description="Certifications"),
+                        "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects"),
+                        "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                       description="Volunteering experiences"),
+                        "references": openapi.Schema(type=openapi.TYPE_OBJECT, description="References"),
+                        "headline": openapi.Schema(type=openapi.TYPE_STRING, description="Professional headline"),
+                        "summary": openapi.Schema(type=openapi.TYPE_STRING, description="Summary or bio"),
+                    },
+                ),
+                "template": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="Template data fields.",
+                    properties={
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                        "reference": openapi.Schema(type=openapi.TYPE_STRING, description="Template reference."),
+                        "language": openapi.Schema(type=openapi.TYPE_STRING, description="Template language."),
+                        "templateData": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="The nested template data structure.",
+                            properties={
+                                "identity": openapi.Schema(type=openapi.TYPE_STRING, description="Template identity."),
+                                "template": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                                "company_logo": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Company logo details."),
+                                "page": openapi.Schema(type=openapi.TYPE_OBJECT, description="Page layout details."),
+                                "certifications": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                                 description="Certifications layout."),
+                                "education": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education layout."),
+                                "experience": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Experience layout."),
+                                "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Volunteering layout."),
+                                "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests layout."),
+                                "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages layout."),
+                                "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects layout."),
+                                "references": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="References layout."),
+                                "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills layout."),
+                                "social": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                         description="Social profiles layout."),
+                                "theme": openapi.Schema(type=openapi.TYPE_OBJECT, description="Theme settings."),
+                                "personnel": openapi.Schema(type=openapi.TYPE_OBJECT, description="Personnel layout."),
+                                "typography": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Typography settings."),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
         responses={
-            200: CVDataSerializer(),
-            400: openapi.Response(description='Bad Request'),
-            404: openapi.Response(description='Tailored CV not found or does not belong to the authenticated user.')
-        }
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="Tailored CV or associated data not found."),
+        },
     )
     def put(self, request, id):
         candidate = request.user.candidate
@@ -1608,20 +1941,181 @@ class TailoredCVView(APIView):
         try:
             tailored_cv = CV.objects.get(id=id, candidate=candidate, cv_type=CV.TAILORED)
         except CV.DoesNotExist:
-            return Response({"error": "Tailored CV not found or does not belong to the authenticated user."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Tailored CV not found or does not belong to the authenticated user."},
+                            status=status.HTTP_404_NOT_FOUND)
 
-        # Retrieve the CVData associated with the tailored CV
+        # Update CVData
+        if "cv_data" in request.data:
+            try:
+                cv_data = CVData.objects.get(cv=tailored_cv)
+            except CVData.DoesNotExist:
+                cv_data = CVData(cv=tailored_cv)
+
+            cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=False)
+            if not cv_data_serializer.is_valid():
+                return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            cv_data_serializer.save()
+
+        # Update Template
+        if "template" in request.data:
+            template_data = request.data.get("template")
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template, created = Template.objects.update_or_create(
+                id=tailored_cv.template.id if tailored_cv.template else None,
+                defaults={
+                    'abstract_template': abstract_template,
+                    'language': template_data.get('language', 'en'),
+                    **template_data.get("templateData", {})
+                }
+            )
+
+            tailored_cv.template = template
+            tailored_cv.save()
+
+        return Response(CVSerializer(tailored_cv, context={"request": request}).data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_description="Partially update a tailored CV's data and template.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="The CV data fields.",
+                    properties={
+                        "title": openapi.Schema(type=openapi.TYPE_STRING, description="CV title"),
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's name"),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's email"),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's phone number"),
+                        "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Candidate's age"),
+                        "city": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's city"),
+                        "work": openapi.Schema(type=openapi.TYPE_OBJECT, description="Work experience details"),
+                        "educations": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education details"),
+                        "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages known"),
+                        "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills"),
+                        "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests"),
+                        "social": openapi.Schema(type=openapi.TYPE_OBJECT, description="Social profiles"),
+                        "certifications": openapi.Schema(type=openapi.TYPE_OBJECT, description="Certifications"),
+                        "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects"),
+                        "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                       description="Volunteering experiences"),
+                        "references": openapi.Schema(type=openapi.TYPE_OBJECT, description="References"),
+                        "headline": openapi.Schema(type=openapi.TYPE_STRING, description="Professional headline"),
+                        "summary": openapi.Schema(type=openapi.TYPE_STRING, description="Summary or bio"),
+                    },
+                ),
+                "template": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="Template data fields.",
+                    properties={
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                        "reference": openapi.Schema(type=openapi.TYPE_STRING, description="Template reference."),
+                        "language": openapi.Schema(type=openapi.TYPE_STRING, description="Template language."),
+                        "templateData": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="The nested template data structure.",
+                            properties={
+                                "identity": openapi.Schema(type=openapi.TYPE_STRING, description="Template identity."),
+                                "template": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                                "company_logo": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Company logo details."),
+                                "page": openapi.Schema(type=openapi.TYPE_OBJECT, description="Page layout details."),
+                                "certifications": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                                 description="Certifications layout."),
+                                "education": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education layout."),
+                                "experience": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Experience layout."),
+                                "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Volunteering layout."),
+                                "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests layout."),
+                                "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages layout."),
+                                "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects layout."),
+                                "references": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="References layout."),
+                                "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills layout."),
+                                "social": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                         description="Social profiles layout."),
+                                "theme": openapi.Schema(type=openapi.TYPE_OBJECT, description="Theme settings."),
+                                "personnel": openapi.Schema(type=openapi.TYPE_OBJECT, description="Personnel layout."),
+                                "typography": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Typography settings."),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+        responses={
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="Tailored CV or associated data not found."),
+        },
+    )
+    def patch(self, request, id):
+        candidate = request.user.candidate
+
+        # Retrieve the tailored CV
         try:
-            cv_data = CVData.objects.get(cv=tailored_cv)
-        except CVData.DoesNotExist:
-            return Response({"error": "No associated CVData found for the tailored CV."}, status=status.HTTP_404_NOT_FOUND)
+            tailored_cv = CV.objects.get(id=id, candidate=candidate, cv_type=CV.TAILORED)
+        except CV.DoesNotExist:
+            return Response({"error": "Tailored CV not found or does not belong to the authenticated user."},
+                            status=status.HTTP_404_NOT_FOUND)
 
-        # Update the CVData
-        serializer = CVDataSerializer(cv_data, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # Partially update CVData
+        if "cv_data" in request.data:
+            try:
+                cv_data = CVData.objects.get(cv=tailored_cv)
+            except CVData.DoesNotExist:
+                cv_data = CVData(cv=tailored_cv)
+
+            cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=True)
+            if not cv_data_serializer.is_valid():
+                return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            cv_data_serializer.save()
+
+        # Partially update Template
+        if "template" in request.data:
+            template_data = request.data.get("template")
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template, created = Template.objects.update_or_create(
+                id=tailored_cv.template.id if tailored_cv.template else None,
+                defaults={
+                    'abstract_template': abstract_template,
+                    'language': template_data.get('language', 'en'),
+                    **template_data.get("templateData", {})
+                }
+            )
+
+            tailored_cv.template = template
+            tailored_cv.save()
+
+        return Response(CVSerializer(tailored_cv, context={"request": request}).data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_description="Delete a tailored CV with its associated template.",
@@ -2009,3 +2503,257 @@ class CVDetailView(APIView):
 
         except CV.DoesNotExist:
             return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    @swagger_auto_schema(
+        operation_description="Update a CV's data and template by ID.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="The CV data fields.",
+                    properties={
+                        "title": openapi.Schema(type=openapi.TYPE_STRING, description="CV title"),
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's name"),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's email"),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's phone number"),
+                        "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Candidate's age"),
+                        "city": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's city"),
+                        "work": openapi.Schema(type=openapi.TYPE_OBJECT, description="Work experience details"),
+                        "educations": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education details"),
+                        "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages known"),
+                        "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills"),
+                        "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests"),
+                        "social": openapi.Schema(type=openapi.TYPE_OBJECT, description="Social profiles"),
+                        "certifications": openapi.Schema(type=openapi.TYPE_OBJECT, description="Certifications"),
+                        "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects"),
+                        "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                       description="Volunteering experiences"),
+                        "references": openapi.Schema(type=openapi.TYPE_OBJECT, description="References"),
+                        "headline": openapi.Schema(type=openapi.TYPE_STRING, description="Professional headline"),
+                        "summary": openapi.Schema(type=openapi.TYPE_STRING, description="Summary or bio"),
+                    },
+                ),
+                "template": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="Template data fields.",
+                    properties={
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                        "reference": openapi.Schema(type=openapi.TYPE_STRING, description="Template reference."),
+                        "language": openapi.Schema(type=openapi.TYPE_STRING, description="Template language."),
+                        "templateData": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="The nested template data structure.",
+                            properties={
+                                "identity": openapi.Schema(type=openapi.TYPE_STRING, description="Template identity."),
+                                "template": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                                "company_logo": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Company logo details."),
+                                "page": openapi.Schema(type=openapi.TYPE_OBJECT, description="Page layout details."),
+                                "certifications": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                                 description="Certifications layout."),
+                                "education": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education layout."),
+                                "experience": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Experience layout."),
+                                "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Volunteering layout."),
+                                "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests layout."),
+                                "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages layout."),
+                                "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects layout."),
+                                "references": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="References layout."),
+                                "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills layout."),
+                                "social": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                         description="Social profiles layout."),
+                                "theme": openapi.Schema(type=openapi.TYPE_OBJECT, description="Theme settings."),
+                                "personnel": openapi.Schema(type=openapi.TYPE_OBJECT, description="Personnel layout."),
+                                "typography": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Typography settings."),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+        responses={
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="CV or AbstractTemplate not found."),
+        },
+    )
+    def put(self, request, id):
+        try:
+            # Retrieve the CV by ID
+            cv = CV.objects.get(id=id, candidate=request.user.candidate)
+        except CV.DoesNotExist:
+            return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update CVData
+        if "cv_data" in request.data:
+            try:
+                cv_data = CVData.objects.get(cv=cv)
+            except CVData.DoesNotExist:
+                cv_data = CVData(cv=cv)
+
+            cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=False)
+            if not cv_data_serializer.is_valid():
+                return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            cv_data_serializer.save()
+
+        # Update Template
+        if "template" in request.data:
+            template_data = request.data.get("template")
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+            
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template, created = Template.objects.update_or_create(
+                id=cv.template.id if cv.template else None,
+                defaults={
+                    'abstract_template': abstract_template,
+                    'language': template_data.get('language', 'en'),
+                    **template_data.get("templateData", {})
+                }
+            )
+
+            cv.template = template
+            cv.save()
+
+        return Response(CVSerializer(cv, context={"request": request}).data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_description="Partially update a CV's data and template by ID.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_data": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="The CV data fields.",
+                    properties={
+                        "title": openapi.Schema(type=openapi.TYPE_STRING, description="CV title"),
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's name"),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's email"),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's phone number"),
+                        "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Candidate's age"),
+                        "city": openapi.Schema(type=openapi.TYPE_STRING, description="Candidate's city"),
+                        "work": openapi.Schema(type=openapi.TYPE_OBJECT, description="Work experience details"),
+                        "educations": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education details"),
+                        "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages known"),
+                        "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills"),
+                        "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests"),
+                        "social": openapi.Schema(type=openapi.TYPE_OBJECT, description="Social profiles"),
+                        "certifications": openapi.Schema(type=openapi.TYPE_OBJECT, description="Certifications"),
+                        "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects"),
+                        "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                       description="Volunteering experiences"),
+                        "references": openapi.Schema(type=openapi.TYPE_OBJECT, description="References"),
+                        "headline": openapi.Schema(type=openapi.TYPE_STRING, description="Professional headline"),
+                        "summary": openapi.Schema(type=openapi.TYPE_STRING, description="Summary or bio"),
+                    },
+                ),
+                "template": openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description="Template data fields.",
+                    properties={
+                        "name": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                        "reference": openapi.Schema(type=openapi.TYPE_STRING, description="Template reference."),
+                        "language": openapi.Schema(type=openapi.TYPE_STRING, description="Template language."),
+                        "templateData": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            description="The nested template data structure.",
+                            properties={
+                                "identity": openapi.Schema(type=openapi.TYPE_STRING, description="Template identity."),
+                                "template": openapi.Schema(type=openapi.TYPE_STRING, description="Template name."),
+                                "company_logo": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Company logo details."),
+                                "page": openapi.Schema(type=openapi.TYPE_OBJECT, description="Page layout details."),
+                                "certifications": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                                 description="Certifications layout."),
+                                "education": openapi.Schema(type=openapi.TYPE_OBJECT, description="Education layout."),
+                                "experience": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Experience layout."),
+                                "volunteering": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                               description="Volunteering layout."),
+                                "interests": openapi.Schema(type=openapi.TYPE_OBJECT, description="Interests layout."),
+                                "languages": openapi.Schema(type=openapi.TYPE_OBJECT, description="Languages layout."),
+                                "projects": openapi.Schema(type=openapi.TYPE_OBJECT, description="Projects layout."),
+                                "references": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="References layout."),
+                                "skills": openapi.Schema(type=openapi.TYPE_OBJECT, description="Skills layout."),
+                                "social": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                         description="Social profiles layout."),
+                                "theme": openapi.Schema(type=openapi.TYPE_OBJECT, description="Theme settings."),
+                                "personnel": openapi.Schema(type=openapi.TYPE_OBJECT, description="Personnel layout."),
+                                "typography": openapi.Schema(type=openapi.TYPE_OBJECT,
+                                                             description="Typography settings."),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+        responses={
+            200: CVSerializer(),
+            400: openapi.Response(description="Bad Request"),
+            404: openapi.Response(description="CV or AbstractTemplate not found."),
+        },
+    )
+    def patch(self, request, id):
+        try:
+            # Retrieve the CV by ID
+            cv = CV.objects.get(id=id, candidate=request.user.candidate)
+        except CV.DoesNotExist:
+            return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Partially update CVData
+        if "cv_data" in request.data:
+            try:
+                cv_data = CVData.objects.get(cv=cv)
+            except CVData.DoesNotExist:
+                cv_data = CVData(cv=cv)
+
+            cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=True)
+            if not cv_data_serializer.is_valid():
+                return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            cv_data_serializer.save()
+
+        # Partially update Template
+        if "template" in request.data:
+            template_data = request.data.get("template")
+            template_name = template_data.get("templateData", {}).get("template")
+            if not template_name:
+                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                abstract_template = AbstractTemplate.objects.get(name=template_name)
+            except AbstractTemplate.DoesNotExist:
+                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+            
+            # Remove unwanted keys from templateData
+            template_data["templateData"].pop("identity", None)
+            template_data["templateData"].pop("template", None)
+
+            template, created = Template.objects.update_or_create(
+                id=cv.template.id if cv.template else None,
+                defaults={
+                    'abstract_template': abstract_template,
+                    'language': template_data.get('language', 'en'),
+                    **template_data.get("templateData", {})
+                }
+            )
+
+            cv.template = template
+            cv.save()
+
+        return Response(CVSerializer(cv, context={"request": request}).data, status=status.HTTP_200_OK)

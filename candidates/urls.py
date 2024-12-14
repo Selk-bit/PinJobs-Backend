@@ -23,7 +23,7 @@ urlpatterns = [
 
     path('cvs/base/upload/', UploadCVView.as_view(), name='upload_cv'),
     path('cvs/base/linkedin/', LinkedInCVView.as_view(), name='linkedin_cv'),
-    path('cvs/base/cvdata/', CVDataView.as_view(), name='cv-data'),
+    path('cvs/base/', CVDataView.as_view(), name='cv-data'),
     path('cvs/base/template/', UserTemplateView.as_view(), name='user-template'),
     path('cvs/tailored/', CandidateTailoredCVsView.as_view(), name='candidate-tailored-cvs'),
     path('cvs/tailored/<int:id>/', TailoredCVView.as_view(), name='update_tailored_cv'),
