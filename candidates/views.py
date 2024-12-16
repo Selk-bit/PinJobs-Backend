@@ -38,6 +38,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
+from rest_framework import serializers
 
 
 class CandidateViewSet(viewsets.ModelViewSet):
@@ -594,11 +595,48 @@ class CVDataView(APIView):
         except CVData.DoesNotExist:
             return Response({"error": "CVData not found for the base CV"}, status=status.HTTP_404_NOT_FOUND)
 
+
+    def handle_cv_data_update(self, cv, cv_data, partial):
+        try:
+            cv_data_instance = CVData.objects.get(cv=cv)
+        except CVData.DoesNotExist:
+            cv_data_instance = CVData(cv=cv)
+
+        serializer = CVDataSerializer(cv_data_instance, data=cv_data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+    def handle_template_update(self, cv, template_data, partial):
+        template_name = template_data.get("templateData", {}).get("template")
+        if not template_name:
+            raise serializers.ValidationError({"error": "Template name is required."})
+
+        try:
+            abstract_template = AbstractTemplate.objects.get(name=template_name)
+        except AbstractTemplate.DoesNotExist:
+            raise serializers.ValidationError({"error": f"AbstractTemplate '{template_name}' not found."})
+
+        # Remove unwanted keys
+        template_data["templateData"].pop("identity", None)
+        template_data["templateData"].pop("template", None)
+
+        template, created = Template.objects.update_or_create(
+            id=cv.template.id if cv.template else None,
+            defaults={
+                'abstract_template': abstract_template,
+                'language': template_data.get('language', 'en'),
+                **template_data.get("templateData", {})
+            }
+        )
+        cv.template = template
+        cv.save()
+
     @swagger_auto_schema(
         operation_description="Update the CV data and template for the authenticated user.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
+                "name": openapi.Schema(type=openapi.TYPE_STRING, description="CV name"),
                 "cv_data": openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     description="The CV data fields.",
@@ -673,60 +711,30 @@ class CVDataView(APIView):
     )
     def put(self, request):
         candidate = request.user.candidate
+        required_keys = {"name", "cv_data", "template"}
 
-        # Retrieve or create the base CV
+        if not required_keys.issubset(request.data.keys()):
+            return Response({"error": f"All fields {required_keys} are required."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
         except CV.DoesNotExist:
-            return Response({"error": "Base CV not found for the candidate."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Update CV Data
-        try:
-            cv_data = CVData.objects.get(cv=cv)
-        except CVData.DoesNotExist:
-            cv_data = CVData(cv=cv)
+        base_cv.name = request.data["name"]
+        base_cv.save(update_fields=["name"])
 
-        cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=False)
-        if not cv_data_serializer.is_valid():
-            return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        cv_data_serializer.save()
+        self.handle_cv_data_update(base_cv, request.data["cv_data"], partial=False)
+        self.handle_template_update(base_cv, request.data["template"], partial=False)
 
-        # Update Template
-        template_data = request.data.get("template")
-        if template_data:
-            template_name = template_data.get("templateData", {}).get("template")
-            if not template_name:
-                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                abstract_template = AbstractTemplate.objects.get(name=template_name)
-            except AbstractTemplate.DoesNotExist:
-                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
-                                status=status.HTTP_404_NOT_FOUND)
-
-            # Remove unwanted keys from templateData
-            template_data["templateData"].pop("identity", None)
-            template_data["templateData"].pop("template", None)
-
-            template, created = Template.objects.update_or_create(
-                id=cv.template.id if cv.template else None,
-                defaults={
-                    'abstract_template': abstract_template,
-                    'language': template_data.get('language', 'en'),
-                    **template_data.get("templateData", {})
-                }
-            )
-
-            cv.template = template
-            cv.save()
-
-        return Response(CVSerializer(cv).data, status=status.HTTP_200_OK)
+        return Response(CVSerializer(base_cv).data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_description="Partially Update the CV data and template for the authenticated user.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
+                "name": openapi.Schema(type=openapi.TYPE_STRING, description="CV name"),
                 "cv_data": openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     description="The CV data fields.",
@@ -801,60 +809,34 @@ class CVDataView(APIView):
     )
     def patch(self, request):
         candidate = request.user.candidate
+        allowed_keys = {"name", "cv_data", "template"}
 
-        # Retrieve or create the base CV
+        if not set(request.data.keys()).intersection(allowed_keys):
+            return Response({"error": f"At least one of {allowed_keys} is required."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+            base_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
         except CV.DoesNotExist:
-            return Response({"error": "Base CV not found for the candidate."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Base CV not found for the candidate"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Update CV Data
-        try:
-            cv_data = CVData.objects.get(cv=cv)
-        except CVData.DoesNotExist:
-            cv_data = CVData(cv=cv)
+        if "name" in request.data:
+            base_cv.name = request.data["name"]
+            base_cv.save(update_fields=["name"])
 
-        cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=True)
-        if not cv_data_serializer.is_valid():
-            return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        cv_data_serializer.save()
+        if "cv_data" in request.data:
+            self.handle_cv_data_update(base_cv, request.data["cv_data"], partial=True)
 
-        # Update Template
-        template_data = request.data.get("template")
-        if template_data:
-            template_name = template_data.get("templateData", {}).get("template")
-            if not template_name:
-                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if "template" in request.data:
+            self.handle_template_update(base_cv, request.data["template"], partial=True)
 
-            try:
-                abstract_template = AbstractTemplate.objects.get(name=template_name)
-            except AbstractTemplate.DoesNotExist:
-                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
-                                status=status.HTTP_404_NOT_FOUND)
-
-            # Remove unwanted keys from templateData
-            template_data["templateData"].pop("identity", None)
-            template_data["templateData"].pop("template", None)
-
-            template, created = Template.objects.update_or_create(
-                id=cv.template.id if cv.template else None,
-                defaults={
-                    'abstract_template': abstract_template,
-                    'language': template_data.get('language', 'en'),
-                    **template_data.get("templateData", {})
-                }
-            )
-
-            cv.template = template
-            cv.save()
-
-        return Response(CVSerializer(cv).data, status=status.HTTP_200_OK)
+        return Response(CVSerializer(base_cv).data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_description="Delete the current CV data and template, and create new ones for the authenticated user's base CV.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
+                "name": openapi.Schema(type=openapi.TYPE_STRING, description="CV name"),
                 "cv_data": openapi.Schema(type=openapi.TYPE_OBJECT, description="CV data fields."),
                 "template": openapi.Schema(type=openapi.TYPE_OBJECT, description="Template data fields."),
             },
@@ -867,52 +849,21 @@ class CVDataView(APIView):
     )
     def post(self, request):
         candidate = request.user.candidate
+        required_keys = {"name", "cv_data", "template"}
+
+        if not required_keys.issubset(request.data.keys()):
+            return Response({"error": f"All fields {required_keys} are required."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Retrieve or create the base CV
-        try:
-            cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
+        base_cv, created = CV.objects.get_or_create(candidate=candidate, cv_type=CV.BASE)
+        base_cv.name = request.data["name"]
+        base_cv.save(update_fields=["name"])
 
-            # Delete existing CV Data and Template
-            if hasattr(cv, "cv_data"):
-                cv.cv_data.delete()
-            if cv.template:
-                cv.template.delete()
-        except CV.DoesNotExist:
-            return Response({"error": "Base CV not found for the candidate."}, status=status.HTTP_404_NOT_FOUND)
+        self.handle_cv_data_update(base_cv, request.data["cv_data"], partial=False)
+        self.handle_template_update(base_cv, request.data["template"], partial=False)
 
-        # Create new CV Data
-        cv_data_serializer = CVDataSerializer(data=request.data.get("cv_data"))
-        if not cv_data_serializer.is_valid():
-            return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        cv_data = cv_data_serializer.save(cv=cv)
+        return Response(CVSerializer(base_cv).data, status=status.HTTP_201_CREATED)
 
-        # Create new Template
-        template_data = request.data.get("template")
-        if template_data:
-            template_name = template_data.get("templateData", {}).get("template")
-            if not template_name:
-                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                abstract_template = AbstractTemplate.objects.get(name=template_name)
-            except AbstractTemplate.DoesNotExist:
-                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
-                                status=status.HTTP_404_NOT_FOUND)
-
-            # Remove unwanted keys from templateData
-            template_data["templateData"].pop("identity", None)
-            template_data["templateData"].pop("template", None)
-
-            template = Template.objects.create(
-                abstract_template=abstract_template,
-                language=template_data.get('language', 'en'),
-                **template_data.get("templateData", {})
-            )
-
-            cv.template = template
-            cv.save()
-
-        return Response(CVSerializer(cv).data, status=status.HTTP_201_CREATED)
 
     @swagger_auto_schema(
         operation_description="Delete the CV data and its associated template for the authenticated user's base CV.",
@@ -1306,7 +1257,6 @@ class JobLinkCVView(APIView):
 
         # Construct the prompt for Gemini
         prompt = construct_single_job_prompt(candidate_profile, job_description, job_link)
-
         # Get the response from Gemini for scoring the job
         try:
             gemini_response = get_gemini_response(prompt)
@@ -2503,6 +2453,7 @@ class CVDetailView(APIView):
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
+                "name": openapi.Schema(type=openapi.TYPE_STRING, description="CV name"),
                 "cv_data": openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     description="The CV data fields.",
@@ -2577,51 +2528,25 @@ class CVDetailView(APIView):
     )
     def put(self, request, id):
         try:
-            # Retrieve the CV by ID
+            # Retrieve the CV
             cv = CV.objects.get(id=id, candidate=request.user.candidate)
         except CV.DoesNotExist:
             return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Update CVData
-        if "cv_data" in request.data:
-            try:
-                cv_data = CVData.objects.get(cv=cv)
-            except CVData.DoesNotExist:
-                cv_data = CVData(cv=cv)
+        # Validate required keys
+        required_keys = {"name", "cv_data", "template"}
+        if not required_keys.issubset(request.data.keys()):
+            return Response({"error": f"All fields {required_keys} are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-            cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=False)
-            if not cv_data_serializer.is_valid():
-                return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            cv_data_serializer.save()
+        # Update name
+        cv.name = request.data.get("name", cv.name)
+        cv.save(update_fields=["name"])
+
+        # Update CVData
+        self.update_cv_data(cv, request.data["cv_data"], partial=False)
 
         # Update Template
-        if "template" in request.data:
-            template_data = request.data.get("template")
-            template_name = template_data.get("templateData", {}).get("template")
-            if not template_name:
-                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                abstract_template = AbstractTemplate.objects.get(name=template_name)
-            except AbstractTemplate.DoesNotExist:
-                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
-                                status=status.HTTP_404_NOT_FOUND)
-            
-            # Remove unwanted keys from templateData
-            template_data["templateData"].pop("identity", None)
-            template_data["templateData"].pop("template", None)
-
-            template, created = Template.objects.update_or_create(
-                id=cv.template.id if cv.template else None,
-                defaults={
-                    'abstract_template': abstract_template,
-                    'language': template_data.get('language', 'en'),
-                    **template_data.get("templateData", {})
-                }
-            )
-
-            cv.template = template
-            cv.save()
+        self.update_template(cv, request.data["template"], partial=False)
 
         return Response(CVSerializer(cv, context={"request": request}).data, status=status.HTTP_200_OK)
 
@@ -2630,6 +2555,7 @@ class CVDetailView(APIView):
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
+                "name": openapi.Schema(type=openapi.TYPE_STRING, description="CV name"),
                 "cv_data": openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     description="The CV data fields.",
@@ -2704,53 +2630,76 @@ class CVDetailView(APIView):
     )
     def patch(self, request, id):
         try:
-            # Retrieve the CV by ID
+            # Retrieve the CV
             cv = CV.objects.get(id=id, candidate=request.user.candidate)
         except CV.DoesNotExist:
             return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Partially update CVData
+        # Allowed keys
+        allowed_keys = {"name", "cv_data", "template"}
+        request_keys = set(request.data.keys())
+
+        # Validate at least one key is valid
+        if not request_keys.intersection(allowed_keys):
+            return Response({"error": f"At least one of {allowed_keys} is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update name if present
+        if "name" in request.data:
+            cv.name = request.data["name"]
+            cv.save(update_fields=["name"])
+
+        # Update CVData if present
         if "cv_data" in request.data:
-            try:
-                cv_data = CVData.objects.get(cv=cv)
-            except CVData.DoesNotExist:
-                cv_data = CVData(cv=cv)
+            self.update_cv_data(cv, request.data["cv_data"], partial=True)
 
-            cv_data_serializer = CVDataSerializer(cv_data, data=request.data.get("cv_data"), partial=True)
-            if not cv_data_serializer.is_valid():
-                return Response(cv_data_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            cv_data_serializer.save()
-
-        # Partially update Template
+        # Update Template if present
         if "template" in request.data:
-            template_data = request.data.get("template")
-            template_name = template_data.get("templateData", {}).get("template")
-            if not template_name:
-                return Response({"error": "Template name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                abstract_template = AbstractTemplate.objects.get(name=template_name)
-            except AbstractTemplate.DoesNotExist:
-                return Response({"error": f"AbstractTemplate with name '{template_name}' not found."},
-                                status=status.HTTP_404_NOT_FOUND)
-            
-            # Remove unwanted keys from templateData
-            template_data["templateData"].pop("identity", None)
-            template_data["templateData"].pop("template", None)
-
-            template, created = Template.objects.update_or_create(
-                id=cv.template.id if cv.template else None,
-                defaults={
-                    'abstract_template': abstract_template,
-                    'language': template_data.get('language', 'en'),
-                    **template_data.get("templateData", {})
-                }
-            )
-
-            cv.template = template
-            cv.save()
+            self.update_template(cv, request.data["template"], partial=True)
 
         return Response(CVSerializer(cv, context={"request": request}).data, status=status.HTTP_200_OK)
+
+    def update_cv_data(self, cv, cv_data, partial):
+        """
+        Helper to update or create CVData.
+        """
+        try:
+            cv_data_instance = CVData.objects.get(cv=cv)
+        except CVData.DoesNotExist:
+            cv_data_instance = CVData(cv=cv)
+
+        serializer = CVDataSerializer(cv_data_instance, data=cv_data, partial=partial)
+        if not serializer.is_valid():
+            raise serializers.ValidationError(serializer.errors)
+        serializer.save()
+
+    def update_template(self, cv, template_data, partial):
+        """
+        Helper to update or create Template.
+        """
+        template_name = template_data.get("templateData", {}).get("template")
+        if not template_name:
+            raise serializers.ValidationError({"error": "Template name is required."})
+
+        try:
+            abstract_template = AbstractTemplate.objects.get(name=template_name)
+        except AbstractTemplate.DoesNotExist:
+            raise serializers.ValidationError({"error": f"AbstractTemplate '{template_name}' not found."})
+
+        # Remove unwanted keys
+        template_data["templateData"].pop("identity", None)
+        template_data["templateData"].pop("template", None)
+
+        template, created = Template.objects.update_or_create(
+            id=cv.template.id if cv.template else None,
+            defaults={
+                'abstract_template': abstract_template,
+                'language': template_data.get('language', 'en'),
+                **template_data.get("templateData", {})
+            }
+        )
+
+        cv.template = template
+        cv.save()
 
     @swagger_auto_schema(
         operation_description="Delete a CV by ID, including its associated template if present.",

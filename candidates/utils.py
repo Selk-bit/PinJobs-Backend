@@ -128,8 +128,7 @@ def construct_job_description(soup):
         text = criteria_tag.get_text(separator='\n', strip=True).replace('Show more', '').replace('Show less', '')
         description_parts.append(text)
 
-    concatenated_description = '\n'.join(description_parts).strip() if description_parts else None
-
+    concatenated_description = f"Job Title: {title}\nCompany name: {company_name}\nLocation : {location}\n" + '\n'.join(description_parts).strip() if description_parts else None
     return title, company_name, location, concatenated_description
 
 
