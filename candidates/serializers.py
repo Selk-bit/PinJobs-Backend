@@ -108,25 +108,12 @@ class CVSerializer(serializers.ModelSerializer):
     job = JobSerializer()
     cv_data = CVDataSerializer()
     thumbnail = serializers.ImageField(read_only=True)
-    name = serializers.SerializerMethodField()
     template = serializers.SerializerMethodField()
 
     class Meta:
         model = CV
-        fields = ['id', "name", 'original_file', 'cv_type', 'generated_pdf', 'thumbnail', 'cv_data', 'job', 'template', 'created_at', 'updated_at']
-
-    def get_name(self, obj):
-        if obj.cv_type == CV.BASE:
-            # For base CVs, use cv_data title
-            title = obj.cv_data.title if obj.cv_data and obj.cv_data.title else "Untitled"
-            return f"{title} - Base CV"
-        elif obj.cv_type == CV.TAILORED:
-            # For tailored CVs, use job title and company name
-            if obj.job:
-                job_title = obj.job.title if obj.job.title else "Untitled Job"
-                company_name = obj.job.company_name if obj.job.company_name else "Unknown Company"
-                return f"{job_title} - {company_name}"
-        return "Untitled"
+        fields = ['id', 'name', 'original_file', 'cv_type', 'generated_pdf',
+                  'thumbnail', 'cv_data', 'job', 'template', 'created_at', 'updated_at']
 
     def get_template(self, obj):
         # Serialize the associated template, if it exists

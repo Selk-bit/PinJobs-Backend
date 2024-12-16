@@ -1,6 +1,6 @@
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from .models import Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate
+from .models import Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate, CVData
 from .constants import DEFAULT_TEMPLATE_DATA
 
 
@@ -30,6 +30,29 @@ def create_default_template(sender, instance, created, **kwargs):
     Signal to create a default template for newly created CVs if none exists,
     and only if the abstract template "sydney" is available.
     """
+    if created and not instance.name:
+        try:
+            if instance.cv_type == CV.BASE:
+                title = instance.cv_data.title if hasattr(instance, 'cv_data') and instance.cv_data.title else "Untitled"
+                instance.name = f"{title} - Base CV"
+            elif instance.cv_type == CV.TAILORED:
+                print("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh")
+                print(instance.job)
+                if instance.job:
+                    job_title = instance.job.title if instance.job.title else "Untitled Job"
+                    company_name = instance.job.company_name if instance.job.company_name else "Unknown Company"
+                    instance.name = f"{job_title} - {company_name}"
+                else:
+                    instance.name = "Untitled"
+            else:
+                instance.name = "Untitled"
+
+            instance.save(update_fields=["name"])
+        except Exception as e:
+            instance.name = "Untitled"
+            instance.save(update_fields=["name"])
+            print(f"Error setting CV name: {e}")
+
     if created and not instance.template:
         try:
             # Retrieve the abstract template "sydney"
@@ -62,3 +85,21 @@ def create_default_template(sender, instance, created, **kwargs):
         # Associate the template with the CV
         instance.template = template
         instance.save()
+
+
+@receiver(post_save, sender=CVData)
+def update_cv_name_after_cvdata_save(sender, instance, created, **kwargs):
+    """
+    Update the CV name after the related CVData is created or updated.
+    """
+    try:
+        cv = instance.cv  # Access the related CV instance
+        if not cv.name or "Untitled" in cv.name:
+            if cv.cv_type == CV.BASE:
+                if not instance.title:
+                    instance.title = instance.headline if instance.headline else "Untitled"
+                cv.name = f"{instance.title} - Base CV"
+                cv.save(update_fields=["name"])
+                instance.save()
+    except Exception as e:
+        print(f"Error updating CV name after CVData save: {e}")

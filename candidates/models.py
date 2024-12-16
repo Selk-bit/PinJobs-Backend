@@ -118,6 +118,7 @@ class CV(models.Model):
     original_file = models.FileField(upload_to='cvs/original/', blank=True, null=True)
     template = models.OneToOneField(Template, on_delete=models.SET_NULL, null=True, blank=True)
     generated_pdf = models.FileField(upload_to='cvs/pdf/', blank=True, null=True)
+    name = models.CharField(max_length=255, blank=True, null=True)
     cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
     job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
     thumbnail = models.ImageField(upload_to='cv_thumbnails/', blank=True, null=True)
@@ -165,7 +166,7 @@ class CVData(models.Model):
 
 
 class Job(models.Model):
-    title = models.CharField(max_length=255)
+    title = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField()
     requirements = models.JSONField(blank=True, null=True)
     company_name = models.CharField(max_length=255, blank=True, null=True)

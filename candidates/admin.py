@@ -3,9 +3,14 @@ from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurch
                      ScrapingSettings, Pack, Price, CreditAction, KeywordLocationCombination, Favorite, AbstractTemplate)
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
-from import_export import resources
+from import_export import resources, fields
 from import_export.admin import ImportExportModelAdmin
 from datetime import datetime
+import logging
+from import_export import widgets
+
+
+logger = logging.getLogger(__name__)
 
 
 @admin.register(AbstractTemplate)
@@ -99,6 +104,13 @@ class CVDataAdmin(admin.ModelAdmin):
     search_fields = ('cv__candidate__first_name', 'cv__candidate__last_name')
 
 
+class NullableIntegerWidget(widgets.IntegerWidget):
+    def clean(self, value, row=None, *args, **kwargs):
+        if value == '':
+            return None
+        return super().clean(value, row=row, *args, **kwargs)
+
+
 class JobResource(resources.ModelResource):
     class Meta:
         model = Job
@@ -107,23 +119,34 @@ class JobResource(resources.ModelResource):
             'company_size', 'location', 'linkedin_profiles', 'employment_type',
             'original_url', 'salary_range', 'min_salary', 'max_salary',
             'benefits', 'skills_required', 'posted_date', 'expiration_date',
-            'industry', 'job_type'
+            'industry', 'job_type', 'job_id'
         ]
         export_order = fields
+        skip_unknown = True
 
-    def import_row(self, row, instance_loader, **kwargs):
+    def before_import_row(self, row, **kwargs):
         """
-        Custom import logic:
-        - If a job with the same ID exists, skip it.
-        - If a job with the same title, location, and company_name exists:
-          - Compare posted_date, and if the CSV job's posted_date is more recent,
-            update the existing job with the CSV job's data.
+        Decide if this row should be skipped or updated before importing.
+        If we return None, the row will be skipped.
         """
-        # Check if a job with the same ID exists
-        if Job.objects.filter(job_id=row.get('job_id')).exists():
-            return None  # Skip the row
+        job_id = row.get('job_id')
 
-        # Check if a job with the same title, location, and company_name exists
+        # Convert empty string in 'company_size' to None
+        # so that it can be saved as NULL in the database.
+        if 'company_size' in row and row['company_size'] == '':
+            row['company_size'] = None
+
+        # Skip rows with no job_id
+        if not job_id:
+            logger.warning("Skipping row with missing job_id: %s", row)
+            return None
+
+        # Check if a job with the same ID exists (duplicate)
+        if Job.objects.filter(job_id=job_id).exists():
+            logger.info("Skipping duplicate job_id: %s", job_id)
+            return None
+
+        # Check for duplicate jobs with (title, company_name, location)
         existing_job = Job.objects.filter(
             title=row.get('title'),
             company_name=row.get('company_name'),
@@ -131,24 +154,39 @@ class JobResource(resources.ModelResource):
         ).first()
 
         if existing_job:
-            # Compare posted_date
-            csv_posted_date = row.get('posted_date')
-            if csv_posted_date and existing_job.posted_date:
-                csv_posted_date = datetime.strptime(csv_posted_date, "%Y-%m-%d").date()
+            csv_posted_date_str = row.get('posted_date')
+            if csv_posted_date_str and existing_job.posted_date:
+                csv_posted_date = datetime.strptime(csv_posted_date_str, "%Y-%m-%d").date()
+                # If CSV posted_date is more recent, update the existing job
                 if csv_posted_date > existing_job.posted_date:
-                    # Update the existing job with CSV data
                     for field in self.get_fields():
-                        if field.attribute in row and field.attribute != 'id':  # Skip the ID field
+                        if field.attribute in row and field.attribute not in ['id', 'created_at', 'updated_at']:
                             setattr(existing_job, field.attribute, row.get(field.attribute))
+                    existing_job.updated_at = datetime.now()
                     existing_job.save()
-            return None  # Skip the row, as it's already handled
+                    logger.info("Updated existing job: %s", existing_job)
+                    # After updating, skip creating a new entry
+                    return None
+                else:
+                    # CSV posted_date is the same or older, skip row
+                    logger.info("Skipping row, existing job is newer or equal: %s", existing_job)
+                    return None
+            else:
+                # If no posted_date or not newer, skip
+                logger.info("Skipping row, no posted_date or not newer: %s", existing_job)
+                return None
 
-        # If no existing job matches, proceed with creating a new job
-        return super().import_row(row, instance_loader, **kwargs)
+        # If no reason to skip, return the row as-is
+        return row
+
+    # No need to override import_row now, since skipping and updating logic
+    # is handled in before_import_row(). If before_import_row() returns row,
+    # django-import-export will attempt to create a new instance.
 
 
 @admin.register(Job)
 class JobAdmin(ImportExportModelAdmin):
+    resource_class = JobResource
     list_display = ('id', 'title', 'company_name', 'location', 'employment_type', 'job_type', 'posted_date')
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
@@ -161,7 +199,6 @@ class JobAdmin(ImportExportModelAdmin):
 
 @admin.register(JobSearch)
 class JobSearchAdmin(admin.ModelAdmin):
-    resource_class = JobResource
     list_display = ('job', 'candidate', 'similarity_score', 'search_date')
     search_fields = ('candidate__first_name', 'job__title')
 
