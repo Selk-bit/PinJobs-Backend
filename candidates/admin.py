@@ -123,25 +123,53 @@ class JobResource(resources.ModelResource):
         ]
         export_order = fields
         skip_unknown = True
+        skip_unchanged = True
+        report_skipped = True
+        import_id_fields = ("job_id",)
 
     def before_import_row(self, row, **kwargs):
         """
-        Decide if this row should be skipped or updated before importing.
-        If we return None, the row will be skipped.
+        Clean data before importing:
+        - Convert empty strings to None for specific fields.
+        - Convert 'posted_date' to a datetime object.
+        - Handle row skipping logic for duplicates and outdated jobs.
         """
+        # Fields that should convert empty strings to None
+        nullable_fields = ['company_size', 'min_salary', 'max_salary']
+
+        for field in nullable_fields:
+            if row.get(field) == '':
+                row[field] = None
+
+        # Handle 'posted_date' - convert empty strings to None or parse valid date
+        if 'posted_date' in row:
+            if row['posted_date'] == '':
+                row['posted_date'] = None
+            else:
+                try:
+                    row['posted_date'] = datetime.strptime(row['posted_date'], "%Y-%m-%d").date()
+                except ValueError:
+                    logger.warning("Invalid date format for posted_date: %s", row['posted_date'])
+                    row['posted_date'] = None
+
+        # Handle 'expiration_date' - convert empty strings to None or parse valid date
+        if 'expiration_date' in row:
+            if row['expiration_date'] == '':
+                row['expiration_date'] = None
+            else:
+                try:
+                    row['expiration_date'] = datetime.strptime(row['expiration_date'], "%Y-%m-%d").date()
+                except ValueError:
+                    logger.warning("Invalid date format for expiration_date: %s", row['expiration_date'])
+                    row['expiration_date'] = None
+
+        # Handle missing job_id
         job_id = row.get('job_id')
-
-        # Convert empty string in 'company_size' to None
-        # so that it can be saved as NULL in the database.
-        if 'company_size' in row and row['company_size'] == '':
-            row['company_size'] = None
-
-        # Skip rows with no job_id
         if not job_id:
             logger.warning("Skipping row with missing job_id: %s", row)
             return None
 
-        # Check if a job with the same ID exists (duplicate)
+        # Skip duplicate job_id
         if Job.objects.filter(job_id=job_id).exists():
             logger.info("Skipping duplicate job_id: %s", job_id)
             return None
@@ -154,34 +182,23 @@ class JobResource(resources.ModelResource):
         ).first()
 
         if existing_job:
-            csv_posted_date_str = row.get('posted_date')
-            if csv_posted_date_str and existing_job.posted_date:
-                csv_posted_date = datetime.strptime(csv_posted_date_str, "%Y-%m-%d").date()
-                # If CSV posted_date is more recent, update the existing job
+            csv_posted_date = row.get('posted_date')
+            if csv_posted_date and existing_job.posted_date:
+                # Compare dates
                 if csv_posted_date > existing_job.posted_date:
+                    # Update fields for the existing job
                     for field in self.get_fields():
                         if field.attribute in row and field.attribute not in ['id', 'created_at', 'updated_at']:
                             setattr(existing_job, field.attribute, row.get(field.attribute))
                     existing_job.updated_at = datetime.now()
                     existing_job.save()
                     logger.info("Updated existing job: %s", existing_job)
-                    # After updating, skip creating a new entry
-                    return None
+                    return None  # Skip row after updating
                 else:
-                    # CSV posted_date is the same or older, skip row
                     logger.info("Skipping row, existing job is newer or equal: %s", existing_job)
                     return None
-            else:
-                # If no posted_date or not newer, skip
-                logger.info("Skipping row, no posted_date or not newer: %s", existing_job)
-                return None
 
-        # If no reason to skip, return the row as-is
-        return row
-
-    # No need to override import_row now, since skipping and updating logic
-    # is handled in before_import_row(). If before_import_row() returns row,
-    # django-import-export will attempt to create a new instance.
+        return row  # Proceed with creating a new job
 
 
 @admin.register(Job)
