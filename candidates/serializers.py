@@ -85,6 +85,26 @@ class CVDataSerializer(serializers.ModelSerializer):
                 data[field] = None
         return super().to_internal_value(data)
 
+    def to_representation(self, instance):
+        """
+        Override the to_representation method to ensure JSONFields return
+        an empty list instead of None.
+        """
+        representation = super().to_representation(instance)
+
+        # List of JSONFields in the CVData model
+        json_fields = [
+            "work", "educations", "languages", "skills", "interests",
+            "social", "certifications", "projects", "volunteering", "references"
+        ]
+
+        # Replace None with an empty list for JSONFields
+        for field in json_fields:
+            if representation.get(field) is None:
+                representation[field] = []
+
+        return representation
+
 
 class JobSerializer(serializers.ModelSerializer):
     similarity_score = serializers.SerializerMethodField()
