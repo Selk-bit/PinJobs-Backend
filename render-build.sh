@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Exit on error
+# exit on error
 set -o errexit
 
-# Define the target directory
-TARGET_DIR=/opt/render/chromium/chrome-linux
+STORAGE_DIR=/opt/render/project/.render
 
-# Check if Chromium is already installed
-if [ ! -f $TARGET_DIR/chrome ]; then
-    echo "Downloading Chromium..."
-    mkdir -p $TARGET_DIR
-    cd $TARGET_DIR
-    # Download the latest stable Chromium build for Linux
-    wget -O chromium.tar.xz https://download-chromium.appspot.com/dl/Linux_x64?type=snapshots
-    # Extract the downloaded archive
-    tar -xf chromium.tar.xz --strip-components=1
-    # Remove the archive to save space
-    rm chromium.tar.xz
-    echo "Chromium installed at $TARGET_DIR/chrome"
+if [[ ! -d $STORAGE_DIR/chrome ]]; then
+  echo "...Downloading Chrome"
+  mkdir -p $STORAGE_DIR/chrome
+  cd $STORAGE_DIR/chrome
+  wget -P ./ https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  dpkg -x ./google-chrome-stable_current_amd64.deb $STORAGE_DIR/chrome
+  rm ./google-chrome-stable_current_amd64.deb
+  cd $HOME/project/src # Make sure we return to where we were
 else
-    echo "Chromium already installed at $TARGET_DIR/chrome"
+  echo "...Using Chrome from cache"
 fi
+
+# be sure to add Chromes location to the PATH as part of your Start Command
+# export PATH="${PATH}:/opt/render/project/.render/chrome/opt/google/chrome"
+
+# add your own build commands...

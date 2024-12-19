@@ -153,7 +153,8 @@ def get_options():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
-    chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
+    # chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
+    chrome_options.binary_location = "/opt/render/project/.render/chrome/opt/google/chrome/chrome"
     return chrome_options
 
 
