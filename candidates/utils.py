@@ -24,6 +24,17 @@ from fake_useragent import UserAgent
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
 from .serializers import CVDataSerializer
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from PIL import Image
+from pdf2image import convert_from_path
+from selenium.webdriver.chrome.service import Service
+import chromedriver_autoinstaller
+from django.core.files import File
+import base64
+
 
 ua = UserAgent()
 client_id = os.getenv('PAYPAL_CLIENT_ID')
@@ -54,9 +65,62 @@ ALLOWED_JOB_DOMAINS = {
 }
 Cookies = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Cookie": 'lang=v=2&lang=en-us; bcookie="v=2&13690459-2695-4db8-8920-eb8acafd8bb0"; lidc="b=OGST01:s=O:r=O:a=O:p=O:g=3446:u=1:x=1:i=1731604780:t=1731691180:v=2:sig=AQH9Fke10UQG9Y2cVZtB9GxcuhLRjHYT"; __cf_bm=t1G.2BT5aBYyrtSdXb1i1P1C62LySBfwfGB0qPAeJKM-1731604780-1.0.1.1-vsyEyIXbZoIk2K9ZdnwsX_JX50i.PWUOGpCco0p_8YN4Ox9urlWJdFzhWVcmSx2mMfquMeUrLfJB4OmWaplE_g; JSESSIONID=ajax:7418003674519976640; bscookie="v=1&20241114171953262036d0-c9e0-4821-8104-95261fbea1f2AQGQhsqDVF82rmiyryMBtG9R_9mqrteN"; AMCVS_14215E3D5995C57C0A495C55%40AdobeOrg=1; AMCV_14215E3D5995C57C0A495C55%40AdobeOrg=-637568504%7CMCIDTS%7C20042%7CMCMID%7C24006825359064228502848929369249235580%7CMCAAMLH-1732209601%7C6%7CMCAAMB-1732209601%7C6G1ynYcLPuiQxYZrsz_pkqfLG9yMXBpb2zX5dvJdYQJzPXImdj0y%7CMCOPTOUT-1731612001s%7CNONE%7CvVersion%7C5.1.1; aam_uuid=24229005248847717212830020980619194807; _gcl_au=1.1.1528757662.1731604801; ccookie=0001AQGJ9Xfxg73P4wAAAZMrsWe4+zApGcXdE5zp5BKFyMPBrHTrMd+HPwNATFZpf3K6yYhWGy2cxQN+vft6FExugPGJMfXh49ZkQd/J9FOALHHAvt1wIQ3G5zTTqlpL6u+YtBHNSdhX62lCOcKPgISJ2Jsn3ifKnxsiOANIowr213txeQ==; _uetsid=ae1cad00a2ac11ef941fe55ffdabcbc5; _uetvid=ae1cc490a2ac11efa8cd6b2dc3fdb04a',
-    "Upgrade-Insecure-Requests": "1"
+    "Cookie": 'JSESSIONID=ajax:7848041967472204636; lang=v=2&lang=en-us; bcookie="v=2&e5d26d20-ae1c-42bb-8d62-eb5447692036"; bscookie="v=1&20241215044610fbdb271d-e8b0-412d-89f6-da4f56e3a923AQGQvJZV9wbqclWCiMLwhnGu5ZFY4OmJ"; lidc="b=VGST00:s=V:r=V:a=V:p=V:g=3516:u=1:x=1:i=1734237970:t=1734324370:v=2:sig=AQEqO6q4wUsqR1mj-IwI8yHEBSAQ8KP-"; AMCVS_14215E3D5995C57C0A495C55%40AdobeOrg=1; _gcl_au=1.1.1133647765.1734241347; __cf_bm=ZHOfMYL0.WenI3RhHWMQsQ_mtspTnVnI3k0PTMf5HXA-1734256120-1.0.1.1-JDhdDn5NmYf6DZLz_972zyLhHGer_6BJgNUascersqKO6_1XuYayFLI1KYFVHDDWWGCqZnrX2SN1sd19AyHedQ; _uetsid=5da19ed0baa711efb7f4279e395081d5; _uetvid=5da1d750baa711ef9b0747d65465cd51; AMCV_14215E3D5995C57C0A495C55%40AdobeOrg=-637568504%7CMCIDTS%7C20073%7CMCMID%7C42801921487020161892225787033943760464%7CMCAAMLH-1734861054%7C6%7CMCAAMB-1734861054%7C6G1ynYcLPuiQxYZrsz_pkqfLG9yMXBpb2zX5dvJdYQJzPXImdj0y%7CMCOPTOUT-1734263454s%7CNONE%7CvVersion%7C5.1.1; aam_uuid=42990763440476163742174318049666117019; ccookie=0001AQH75bAWf2cLlgAAAZPJvkBI3nO8UfPNWap+B1Bi5NyQywHD5P5/ReAUufFnzFUWNIWC29YroQeNi+adBDegEOWdxb2VLF9zRAt1eZhwAyzc1IzyRkMl7GYBFO5I4AG2n9qDMyByiVAWIqg5H5TKSFkhzQgq7w9tySbyKqftOyuiSmT3; fid=AQFycxUlXPfaYAAAAZPJvnY71ClLx10eBwDihj-kYLKFBS2_tFZVSGZcPi6E4zls6nboUn5ijEDBCg; fcookie=AQHzA-Q_fb1ETwAAAZPJvn2PEGbbt4_aTcf_0tC-xvwRjXeTRYYARKJS6ZkgH5QVDWqcwMmsv13-vUy_cu37Q7yfDgjRRW8nHxd4uPqQvi6EkF2NLcfuSUx-VbfMwm5kgnFfQrcwIYoHOeMM5VtlmbomuW48IQHBkP_46sLhAwaL3D5KiyrU_ItamrG5HbCkrtaTqgLovTkEhUsK7Umkt2ECKBOJLzTTw7oAjNau1R7hPi6ZLxudK8FsKc5BUyNh43psSZId7Ijc41wd2QScRwS4yhaiu3oJgGSt7tl6ZMuPETaE925hp92c8IGjnXfMF3YqrcrFLnooc2uUT5dunNCR9N6fUTknjqXH/q+A1Ytg==',
+    "Upgrade-Insecure-Requests": "1",
 }
+PROXY_SOURCES = [
+    "https://www.sslproxies.org/",
+    "https://www.us-proxy.org/",
+    "https://free-proxy-list.net/uk-proxy.html",
+    "https://free-proxy-list.net/"
+]
+
+
+# --------------------------
+# Proxy Fetching Functions
+# --------------------------
+
+async def fetch_html(session, url):
+    headers = {
+        "User-Agent": ua.random,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    }
+    try:
+        async with session.get(url, headers=headers, timeout=10) as response:
+            if response.status == 200:
+                return await response.text()
+    except:
+        return None
+
+
+def extract_proxies(response_text):
+    if not response_text:
+        return []
+    # Common pattern: proxies often appear in <textarea> or a similar block
+    textarea_content = re.search(r"<textarea.*?>([\s\S]*?)</textarea>", response_text)
+    if not textarea_content:
+        return []
+    content = textarea_content.group(1)
+    proxies = re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}:\d+\b", content)
+    return proxies
+
+
+async def get_proxies_async():
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_html(session, url) for url in PROXY_SOURCES]
+        responses = await asyncio.gather(*tasks)
+    all_proxies = []
+    for resp in responses:
+        if resp:
+            extracted = extract_proxies(resp)
+            selected = extracted[:5]
+            all_proxies.extend(selected)
+    return all_proxies[:20]
+
+
+def get_proxies():
+    # Run the async proxy fetcher
+    return asyncio.run(get_proxies_async())
 
 
 def get_gemini_response(prompt):
@@ -76,22 +140,20 @@ def get_temp_dir():
 
 
 def get_options():
-    folder = 'chromedriver/'
     chrome_options = Options()
     width = random.randint(1000, 2000)
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    # chrome_options.add_argument("--headless")
-    # chrome_options.add_argument('--no-sandbox')
-    # chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
-    # chrome_options.binary_location = os.getenv("CHROME_BIN", "/opt/google/chrome/google-chrome")
-    # chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
+    chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
     return chrome_options
 
 
@@ -411,42 +473,46 @@ def construct_prompt(candidate_profile, jobs_data):
     prompt = f"""
     You are provided with a candidate's profile in JSON format and a list of job postings. Your task is to compare the candidate's profile with each job and assign a matching score based on the following refined criteria:
 
-    1. **Location Match (20 points):**
-       - **20 points:** Candidate's city matches the job location or the job is remote.
-       - **15 points:** Candidate's city is within the same region or state as the job.
-       - **10 points:** Candidate's city is within the same country.
-       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
-       - **0 points:** Locations are different with no indication of relocation.
-
-    2. **Experience Match (20 points):**
-       - Calculate the percentage of required experience met by the candidate.
-       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
-       - If the candidate exceeds the required experience, cap the score at 20 points.
-
-    3. **Skills Match (30 points):**
-       - Compare the required skills with the candidate's skills.
-       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
-       - Include both hard and soft skills in the assessment.
-
-    4. **Education Match (10 points):**
+    1. **Job Title Match (10 points):**
+       - **10 points:** Candidate's job title is the exact same as the job title in the job description.
+       - **7.5 points:** Candidate's job title is a recognized variation of the job title in the job description.
+       - **5 points:** Candidate's job title and the job's title are not identical but are very closely related in function, duties, or industry focus (e.g., "Fullstack Developer" vs "Software Engineer").
+       - **2.5 points:** Candidate's job title is somewhat related, still within the same broader industry or domain.
+       - **0 points:** Candidate's job title is in a completely different industry or nature than the job title in the job description.
+    
+    2. **Location Match (10 points):**
+       - **10 points:** Candidate's city matches the job location, or the job is remote.
+       - **7.5 points:** Candidate's city is within the same region or state as the job.
+       - **5 points:** Candidate's city is within the same country as the job.
+       - **2.5 points:** Candidate's country differs, but the job allows relocation.
+       - **0 points:** Location is different with no indication of remote or relocation.
+    
+    3. **Experience Match (20 points):**
+       - Calculate the percentage of the required experience that the candidate meets.
+       - **Points Awarded:** `(Candidate_Years_of_Experience / Required_Years_of_Experience) * 20`, capped at 20.
+    
+    4. **Skills Match (30 points):**
+       - Compare required skills to candidate's skills (both hard and soft).
+       - **Points Awarded:** `(Number_of_Matching_Skills / Total_Required_Skills) * 30`
+    
+    5. **Education Match (10 points):**
        - **10 points:** Candidate's education level exceeds the requirement.
-       - **8 points:** Candidate's education level meets the requirement.
-       - **5 points:** Candidate's education is slightly below the requirement.
-       - **0 points:** Candidate's education does not meet the requirement.
-
-    5. **Role Requirements Match (10 points):**
-       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
-       - **Points Awarded:** (Relevance Percentage) * 10
-       - Use detailed analysis to determine relevance.
-
-    6. **Language Proficiency (5 points):**
+       - **8 points:** Education level meets the requirement.
+       - **5 points:** Slightly below the requirement.
+       - **0 points:** Does not meet the requirement.
+    
+    6. **Role Requirements Match (10 points):**
+       - Assess how the candidate's past responsibilities and achievements align with the job's responsibilities.
+       - **Points Awarded:** `(Relevance_Percentage) * 10`
+    
+    7. **Language Proficiency (5 points):**
        - **5 points:** Candidate fully meets language requirements.
-       - **2-4 points:** Candidate partially meets language requirements.
+       - **2-4 points:** Candidate partially meets them.
        - **0 points:** Candidate does not meet language requirements.
-
-    7. **Additional Criteria (5 points):**
-       - Consider certifications, interests, and other relevant factors.
-       - **Points Awarded:** (Relevance Percentage) * 5
+    
+    8. **Additional Criteria (5 points):**
+       - Consider certifications, interests, projects, volunteering, and other relevant factors.
+       - **Points Awarded:** `(Relevance_Percentage) * 5`
 
     **Instructions:**
 
@@ -456,7 +522,9 @@ def construct_prompt(candidate_profile, jobs_data):
     - Respond with a JSON array containing objects for each job, following the specified JSON format below.
     - Add a key called "score" in each job's object, representing the matching score (use a float value for precision).
     - Do not include any comments or explanations in your response. Only provide the JSON array.
-
+    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
+    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
+    
     **JSON Format:**
 
     {json.dumps(json_format, indent=4)}
@@ -693,31 +761,59 @@ def is_valid_job_url(url):
     return False
 
 
-def fetch_job_description(url, max_retries=100):
-    """
-    Fetches the job description from a job URL by retrying up to max_retries times.
-    """
-    for _ in range(max_retries):
-        headers = {
-            "User-Agent": ua.random,
-            "Accept": Cookies["Accept"],
-            "Cookie": Cookies["Cookie"],
-            "Upgrade-Insecure-Requests": Cookies["Upgrade-Insecure-Requests"],
+def fetch_description(url, proxy=None):
+    headers = {
+        "User-Agent": ua.random,
+        "Accept": Cookies["Accept"],
+        "Cookie": Cookies["Cookie"],
+        "Upgrade-Insecure-Requests": Cookies["Upgrade-Insecure-Requests"]
+    }
+    proxies = None
+    if proxy:
+        proxies = {
+            "http": proxy,
+            "https": proxy
         }
-        try:
-            job_detail_url = construct_job_detail_url(url)
-            response = requests.get(job_detail_url, headers=headers)
-
-            if response.status_code == 200:
-                # Parse the HTML using BeautifulSoup
-                soup = BeautifulSoup(response.text, 'html.parser')
-                # Extract the job description
-                _, _, _, description = construct_job_description(soup)
-                return description
-        except Exception as e:
-            time.sleep(random.uniform(3, 15))
+    try:
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=3)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Assuming construct_job_description returns (_, _, _, description)
+            _, _, _, description = construct_job_description(soup)
+            return description
+    except:
+        pass
     return None
 
+
+def fetch_job_description(url, max_retries=100):
+    for _ in range(max_retries):
+        # Fetch new proxies every retry
+        proxies = get_proxies()
+        job_detail_url = construct_job_detail_url(url)
+
+        # Use a ThreadPoolExecutor to run requests concurrently
+        with ThreadPoolExecutor(max_workers=21) as executor:
+            futures = []
+            # 20 with proxies
+            for p in proxies:
+                futures.append(executor.submit(fetch_description, job_detail_url, p))
+            # 1 without proxy
+            futures.append(executor.submit(fetch_description, job_detail_url, None))
+
+            # As soon as one completes, check result
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    # We got a successful description
+                    return result
+
+        # If we reach here, no success in this retry
+        # Wait and try again
+        time.sleep(random.uniform(3, 15))
+
+    # If no success after all retries
+    return None
 
 def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
     if cv_data_instance:
@@ -928,43 +1024,48 @@ def construct_single_job_prompt(candidate_profile, job_description, job_url):
     prompt = f"""
     You are provided with a candidate's profile in JSON format and a single job posting. Your task is to compare the candidate's profile with the job and assign a matching score based on the following refined criteria:
 
-    1. **Location Match (20 points):**
-       - **20 points:** Candidate's city matches the job location or the job is remote.
-       - **15 points:** Candidate's city is within the same region or state as the job.
-       - **10 points:** Candidate's city is within the same country.
-       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
-       - **0 points:** Locations are different with no indication of relocation.
-
-    2. **Experience Match (20 points):**
-       - Calculate the percentage of required experience met by the candidate.
-       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
-       - If the candidate exceeds the required experience, cap the score at 20 points.
-
-    3. **Skills Match (30 points):**
-       - Compare the required skills with the candidate's skills.
-       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
-       - Include both hard and soft skills in the assessment.
-
-    4. **Education Match (10 points):**
+    1. **Job Title Match (10 points):**
+       - **10 points:** Candidate's job title is the exact same as the job title in the job description.
+       - **7.5 points:** Candidate's job title is a recognized variation of the job title in the job description.
+       - **5 points:** Candidate's job title and the job's title are not identical but are very closely related in function, duties, or industry focus (e.g., "Fullstack Developer" vs "Software Engineer").
+       - **2.5 points:** Candidate's job title is somewhat related, still within the same broader industry or domain.
+       - **0 points:** Candidate's job title is in a completely different industry or nature than the job title in the job description.
+    
+    2. **Location Match (10 points):**
+       - **10 points:** Candidate's city matches the job location, or the job is remote.
+       - **7.5 points:** Candidate's city is within the same region or state as the job.
+       - **5 points:** Candidate's city is within the same country as the job.
+       - **2.5 points:** Candidate's country differs, but the job allows relocation.
+       - **0 points:** Location is different with no indication of remote or relocation.
+    
+    3. **Experience Match (20 points):**
+       - Calculate the percentage of the required experience that the candidate meets.
+       - **Points Awarded:** `(Candidate_Years_of_Experience / Required_Years_of_Experience) * 20`, capped at 20.
+    
+    4. **Skills Match (30 points):**
+       - Compare required skills to candidate's skills (both hard and soft).
+       - **Points Awarded:** `(Number_of_Matching_Skills / Total_Required_Skills) * 30`
+    
+    5. **Education Match (10 points):**
        - **10 points:** Candidate's education level exceeds the requirement.
-       - **8 points:** Candidate's education level meets the requirement.
-       - **5 points:** Candidate's education is slightly below the requirement.
-       - **0 points:** Candidate's education does not meet the requirement.
-
-    5. **Role Requirements Match (10 points):**
-       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
-       - **Points Awarded:** (Relevance Percentage) * 10
-       - Use detailed analysis to determine relevance.
-
-    6. **Language Proficiency (5 points):**
+       - **8 points:** Education level meets the requirement.
+       - **5 points:** Slightly below the requirement.
+       - **0 points:** Does not meet the requirement.
+    
+    6. **Role Requirements Match (10 points):**
+       - Assess how the candidate's past responsibilities and achievements align with the job's responsibilities.
+       - **Points Awarded:** `(Relevance_Percentage) * 10`
+    
+    7. **Language Proficiency (5 points):**
        - **5 points:** Candidate fully meets language requirements.
-       - **2-4 points:** Candidate partially meets language requirements.
+       - **2-4 points:** Candidate partially meets them.
        - **0 points:** Candidate does not meet language requirements.
+    
+    8. **Additional Criteria (5 points):**
+       - Consider certifications, interests, projects, volunteering, and other relevant factors.
+       - **Points Awarded:** `(Relevance_Percentage) * 5`
 
-    7. **Additional Criteria (5 points):**
-       - Consider certifications, interests, and other relevant factors.
-       - **Points Awarded:** (Relevance Percentage) * 5
-
+   
     **Instructions:**
 
     - Calculate the total score out of 100 points, allowing for decimal values down to .001 to increase granularity. Please be as strict and accurate as possible following the specified criteria.
@@ -973,6 +1074,8 @@ def construct_single_job_prompt(candidate_profile, job_description, job_url):
     - Respond with a JSON object following the specified JSON format below.
     - Add a key called "score" in the object, representing the matching score (use a float value for precision).
     - Do not include any comments or explanations in your response. Only provide the JSON object.
+    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
+    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
 
     **JSON Format:**
 
@@ -1024,46 +1127,52 @@ def construct_only_score_job_prompt(candidate_profile, job_description):
     You are provided with a candidate's profile in JSON format and a job description.
     Your task is to calculate the similarity score based on the following refined criteria:
 
-    1. **Location Match (20 points):**
-       - **20 points:** Candidate's city matches the job location or the job is remote.
-       - **15 points:** Candidate's city is within the same region or state as the job.
-       - **10 points:** Candidate's city is within the same country.
-       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
-       - **0 points:** Locations are different with no indication of relocation.
-
-    2. **Experience Match (20 points):**
-       - Calculate the percentage of required experience met by the candidate.
-       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
-       - If the candidate exceeds the required experience, cap the score at 20 points.
-
-    3. **Skills Match (30 points):**
-       - Compare the required skills with the candidate's skills.
-       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
-       - Include both hard and soft skills in the assessment.
-
-    4. **Education Match (10 points):**
+    1. **Job Title Match (10 points):**
+       - **10 points:** Candidate's job title is the exact same as the job title in the job description.
+       - **7.5 points:** Candidate's job title is a recognized variation of the job title in the job description.
+       - **5 points:** Candidate's job title and the job's title are not identical but are very closely related in function, duties, or industry focus (e.g., "Fullstack Developer" vs "Software Engineer").
+       - **2.5 points:** Candidate's job title is somewhat related, still within the same broader industry or domain.
+       - **0 points:** Candidate's job title is in a completely different industry or nature than the job title in the job description.
+    
+    2. **Location Match (10 points):**
+       - **10 points:** Candidate's city matches the job location, or the job is remote.
+       - **7.5 points:** Candidate's city is within the same region or state as the job.
+       - **5 points:** Candidate's city is within the same country as the job.
+       - **2.5 points:** Candidate's country differs, but the job allows relocation.
+       - **0 points:** Location is different with no indication of remote or relocation.
+    
+    3. **Experience Match (20 points):**
+       - Calculate the percentage of the required experience that the candidate meets.
+       - **Points Awarded:** `(Candidate_Years_of_Experience / Required_Years_of_Experience) * 20`, capped at 20.
+    
+    4. **Skills Match (30 points):**
+       - Compare required skills to candidate's skills (both hard and soft).
+       - **Points Awarded:** `(Number_of_Matching_Skills / Total_Required_Skills) * 30`
+    
+    5. **Education Match (10 points):**
        - **10 points:** Candidate's education level exceeds the requirement.
-       - **8 points:** Candidate's education level meets the requirement.
-       - **5 points:** Candidate's education is slightly below the requirement.
-       - **0 points:** Candidate's education does not meet the requirement.
-
-    5. **Role Requirements Match (10 points):**
-       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
-       - **Points Awarded:** (Relevance Percentage) * 10
-       - Use detailed analysis to determine relevance.
-
-    6. **Language Proficiency (5 points):**
+       - **8 points:** Education level meets the requirement.
+       - **5 points:** Slightly below the requirement.
+       - **0 points:** Does not meet the requirement.
+    
+    6. **Role Requirements Match (10 points):**
+       - Assess how the candidate's past responsibilities and achievements align with the job's responsibilities.
+       - **Points Awarded:** `(Relevance_Percentage) * 10`
+    
+    7. **Language Proficiency (5 points):**
        - **5 points:** Candidate fully meets language requirements.
-       - **2-4 points:** Candidate partially meets language requirements.
+       - **2-4 points:** Candidate partially meets them.
        - **0 points:** Candidate does not meet language requirements.
-
-    7. **Additional Criteria (5 points):**
-       - Consider certifications, interests, and other relevant factors.
-       - **Points Awarded:** (Relevance Percentage) * 5
+    
+    8. **Additional Criteria (5 points):**
+       - Consider certifications, interests, projects, volunteering, and other relevant factors.
+       - **Points Awarded:** `(Relevance_Percentage) * 5`
 
     **Instructions:**
     - Calculate the total score out of 100.
     - Respond with a JSON object containing only the "score" key.
+    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
+    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
 
     **Candidate Profile:**
     {json.dumps(CVDataSerializer(candidate_profile).data, indent=4, ensure_ascii=False)}
@@ -1136,46 +1245,53 @@ def construct_similarity_prompt(candidate_profile, jobs_data):
     prompt = f"""
     You are provided with a candidate's profile in JSON format and a list of job postings. Your task is to compare the candidate's profile with each job and assign a matching score based on the following refined criteria:
 
-    1. **Location Match (20 points):**
-       - **20 points:** Candidate's city matches the job location or the job is remote.
-       - **15 points:** Candidate's city is within the same region or state as the job.
-       - **10 points:** Candidate's city is within the same country.
-       - **5 points:** Candidate is willing to relocate or the job allows for relocation.
-       - **0 points:** Locations are different with no indication of relocation.
-
-    2. **Experience Match (20 points):**
-       - Calculate the percentage of required experience met by the candidate.
-       - **Points Awarded:** (Candidate's Years of Experience / Required Experience) * 20
-       - If the candidate exceeds the required experience, cap the score at 20 points.
-
-    3. **Skills Match (30 points):**
-       - Compare the required skills with the candidate's skills.
-       - **Points Awarded:** (Number of Matching Skills / Total Required Skills) * 30
-       - Include both hard and soft skills in the assessment.
-
-    4. **Education Match (10 points):**
+    1. **Job Title Match (10 points):**
+       - **10 points:** Candidate's job title is the exact same as the job title in the job description.
+       - **7.5 points:** Candidate's job title is a recognized variation of the job title in the job description.
+       - **5 points:** Candidate's job title and the job's title are not identical but are very closely related in function, duties, or industry focus (e.g., "Fullstack Developer" vs "Software Engineer").
+       - **2.5 points:** Candidate's job title is somewhat related, still within the same broader industry or domain.
+       - **0 points:** Candidate's job title is in a completely different industry or nature than the job title in the job description.
+    
+    2. **Location Match (10 points):**
+       - **10 points:** Candidate's city matches the job location, or the job is remote.
+       - **7.5 points:** Candidate's city is within the same region or state as the job.
+       - **5 points:** Candidate's city is within the same country as the job.
+       - **2.5 points:** Candidate's country differs, but the job allows relocation.
+       - **0 points:** Location is different with no indication of remote or relocation.
+    
+    3. **Experience Match (20 points):**
+       - Calculate the percentage of the required experience that the candidate meets.
+       - **Points Awarded:** `(Candidate_Years_of_Experience / Required_Years_of_Experience) * 20`, capped at 20.
+    
+    4. **Skills Match (30 points):**
+       - Compare required skills to candidate's skills (both hard and soft).
+       - **Points Awarded:** `(Number_of_Matching_Skills / Total_Required_Skills) * 30`
+    
+    5. **Education Match (10 points):**
        - **10 points:** Candidate's education level exceeds the requirement.
-       - **8 points:** Candidate's education level meets the requirement.
-       - **5 points:** Candidate's education is slightly below the requirement.
-       - **0 points:** Candidate's education does not meet the requirement.
-
-    5. **Role Requirements Match (10 points):**
-       - Assess the relevance of the candidate's past responsibilities to the job's responsibilities.
-       - **Points Awarded:** (Relevance Percentage) * 10
-       - Use detailed analysis to determine relevance.
-
-    6. **Language Proficiency (5 points):**
+       - **8 points:** Education level meets the requirement.
+       - **5 points:** Slightly below the requirement.
+       - **0 points:** Does not meet the requirement.
+    
+    6. **Role Requirements Match (10 points):**
+       - Assess how the candidate's past responsibilities and achievements align with the job's responsibilities.
+       - **Points Awarded:** `(Relevance_Percentage) * 10`
+    
+    7. **Language Proficiency (5 points):**
        - **5 points:** Candidate fully meets language requirements.
-       - **2-4 points:** Candidate partially meets language requirements.
+       - **2-4 points:** Candidate partially meets them.
        - **0 points:** Candidate does not meet language requirements.
+    
+    8. **Additional Criteria (5 points):**
+       - Consider certifications, interests, projects, volunteering, and other relevant factors.
+       - **Points Awarded:** `(Relevance_Percentage) * 5`
 
-    7. **Additional Criteria (5 points):**
-       - Consider certifications, interests, and other relevant factors.
-       - **Points Awarded:** (Relevance Percentage) * 5
 
     **Instructions:**
     - For each job, calculate the total score out of 100 points, allowing for decimal values down to .001 to increase granularity. Please be as strict and accurate as possible following the specified criteria. 
     - Respond with a JSON array containing objects for each job, including only the job ID and the calculated score.
+    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
+    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
 
     **JSON Format:**
     [
@@ -1194,3 +1310,74 @@ def construct_similarity_prompt(candidate_profile, jobs_data):
     **Please provide the JSON array as your response, without adding any comments or explanations. Only the JSON.**
     """
     return prompt
+
+
+def generate_cv_pdf(cv):
+    """
+    Generates and saves a PDF for the given CV instance and creates a thumbnail.
+    Removes any previously generated files for the CV.
+    """
+    if not cv.cv_data or not cv.template:
+        raise ValueError("CV must have both data and template to generate PDF")
+
+    # URL for the frontend resume preview
+    url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
+    chrome_options = get_options()
+    driver = None
+
+    try:
+        chromedriver_autoinstaller.install()
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get(url)
+        time.sleep(1)
+        # Wait for the container to load
+        if not driver.find_elements(By.CLASS_NAME, "container"):
+            raise ValueError("Page did not load correctly, container not found.")
+
+        # Generate the PDF
+        response = driver.execute_cdp_cmd("Page.printToPDF", {
+            "printBackground": True,
+            "preferCSSPageSize": True,
+            "displayHeaderFooter": False
+        })
+        pdf_data = base64.b64decode(response['data'])
+
+        # Define paths
+        pdf_filename = f"cv_{cv.id}.pdf"
+        pdf_path = os.path.join(settings.MEDIA_ROOT, "Cvs/pdf/", pdf_filename)
+        thumbnail_filename = f"thumbnail_{cv.id}.png"
+        thumbnail_path = os.path.join(settings.MEDIA_ROOT, "Cvs/thumbnails/", thumbnail_filename)
+
+        # Ensure directories exist
+        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        os.makedirs(os.path.dirname(thumbnail_path), exist_ok=True)
+
+        # Remove previous files if they exist
+        if cv.generated_pdf:
+            old_pdf_path = os.path.join(settings.MEDIA_ROOT, cv.generated_pdf.name)
+            if os.path.exists(old_pdf_path):
+                os.remove(old_pdf_path)
+
+        if cv.thumbnail:
+            old_thumbnail_path = os.path.join(settings.MEDIA_ROOT, cv.thumbnail.name)
+            if os.path.exists(old_thumbnail_path):
+                os.remove(old_thumbnail_path)
+
+        # Save the new PDF
+        with open(pdf_path, "wb") as pdf_file:
+            pdf_file.write(pdf_data)
+        with open(pdf_path, "rb") as pdf_file:
+            cv.generated_pdf.save(pdf_filename, File(pdf_file), save=False)
+
+        # Generate thumbnail from the first page
+        images = convert_from_path(pdf_path, first_page=1, last_page=1)
+        images[0].save(thumbnail_path, "PNG")
+        with open(thumbnail_path, "rb") as thumbnail_file:
+            cv.thumbnail.save(thumbnail_filename, File(thumbnail_file), save=False)
+
+        # Save the CV instance after all updates
+        cv.save()
+
+    finally:
+        if driver:
+            driver.quit()

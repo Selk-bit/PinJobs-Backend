@@ -72,3 +72,4 @@ DEFAULT_TEMPLATE_DATA = {
         'underlineLinks': False,
     },
 }
+FRONTEND_PREVIEW_URL = "https://pinjobs-frontend.onrender.com/resume-preview/"

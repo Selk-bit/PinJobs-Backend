@@ -115,13 +115,13 @@ class CV(models.Model):
     ]
 
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name='cvs')
-    original_file = models.FileField(upload_to='cvs/original/', blank=True, null=True)
+    original_file = models.FileField(upload_to='Cvs/original/', blank=True, null=True)
     template = models.OneToOneField(Template, on_delete=models.SET_NULL, null=True, blank=True)
-    generated_pdf = models.FileField(upload_to='cvs/pdf/', blank=True, null=True)
+    generated_pdf = models.FileField(upload_to='Cvs/pdf/', blank=True, null=True)
     name = models.CharField(max_length=255, blank=True, null=True)
     cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
     job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
-    thumbnail = models.ImageField(upload_to='cv_thumbnails/', blank=True, null=True)
+    thumbnail = models.ImageField(upload_to='Cvs/thumbnails/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

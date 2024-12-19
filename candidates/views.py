@@ -39,6 +39,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from rest_framework import serializers
+from django.http import FileResponse, Http404
 
 
 class CandidateViewSet(viewsets.ModelViewSet):
@@ -1294,9 +1295,9 @@ class JobLinkCVView(APIView):
 
         if score < 50:
             return Response({
-                'message': 'The job does not align well with your profile. Proceeding to tailor a resume is not recommended.',
+                'error': 'The job does not align well with your profile. Proceeding to tailor a resume is not recommended.',
                 'job_score_data': job_score_data
-            }, status=status.HTTP_200_OK)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Check if a tailored CV for this job already exists
         tailored_cv, created = CV.objects.get_or_create(
@@ -2724,3 +2725,53 @@ class CVDetailView(APIView):
 
         except CV.DoesNotExist:
             return Response({"error": "CV not found."}, status=status.HTTP_404_NOT_FOUND)
+
+
+class DownloadCVPDFView(APIView):
+    """
+    API endpoint to download the generated CV PDF.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Download the generated PDF of a CV for the authenticated user.",
+        manual_parameters=[
+            openapi.Parameter(
+                'id', openapi.IN_PATH, description="ID of the CV", type=openapi.TYPE_INTEGER, required=True
+            )
+        ],
+        responses={
+            200: openapi.Response(
+                description="File response with the PDF for download",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_FILE,
+                    description="PDF file of the CV"
+                ),
+            ),
+            400: openapi.Response(
+                description="Bad Request - PDF not generated for this CV.",
+                examples={"application/json": {"error": "PDF not generated for this CV."}}
+            ),
+            404: openapi.Response(
+                description="Not Found - CV or PDF file does not exist.",
+                examples={"application/json": {"error": "CV not found"}}
+            ),
+        },
+        security=[{'Bearer': []}],
+    )
+    def get(self, request, id):
+        try:
+            cv = CV.objects.get(id=id, candidate=request.user.candidate)
+
+            # Return the PDF file for download
+            if not cv.generated_pdf:
+                return Response({"error": "PDF not generated for this CV."}, status=400)
+
+            file_path = cv.generated_pdf.path
+            if not os.path.exists(file_path):
+                raise Http404("File not found")
+
+            return FileResponse(open(file_path, "rb"), as_attachment=True, filename=f"{cv.name}.pdf")
+
+        except CV.DoesNotExist:
+            return Response({"error": "CV not found"}, status=404)
