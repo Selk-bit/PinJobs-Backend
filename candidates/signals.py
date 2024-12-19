@@ -2,6 +2,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from .models import Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate, CVData
 from .constants import DEFAULT_TEMPLATE_DATA
+from .utils import generate_cv_pdf
 
 
 @receiver(post_save, sender=Keyword)
@@ -36,8 +37,6 @@ def create_default_template(sender, instance, created, **kwargs):
                 title = instance.cv_data.title if hasattr(instance, 'cv_data') and instance.cv_data.title else "Untitled"
                 instance.name = f"{title} - Base CV"
             elif instance.cv_type == CV.TAILORED:
-                print("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh")
-                print(instance.job)
                 if instance.job:
                     job_title = instance.job.title if instance.job.title else "Untitled Job"
                     company_name = instance.job.company_name if instance.job.company_name else "Unknown Company"
@@ -103,3 +102,18 @@ def update_cv_name_after_cvdata_save(sender, instance, created, **kwargs):
                 instance.save()
     except Exception as e:
         print(f"Error updating CV name after CVData save: {e}")
+
+
+@receiver(post_save, sender=CVData)
+@receiver(post_save, sender=Template)
+def handle_cv_update(sender, instance, **kwargs):
+    """
+    Signal triggered when CVData or Template is created/updated.
+    """
+    try:
+        cv = instance.cv
+    except AttributeError:
+        cv = instance.cv_set.first()
+
+    if cv and cv.cv_data and cv.template:
+        generate_cv_pdf(cv)
