@@ -12,11 +12,13 @@ if [[ ! -d $STORAGE_DIR/chrome ]]; then
   dpkg -x ./google-chrome-stable_current_amd64.deb $STORAGE_DIR/chrome
   rm ./google-chrome-stable_current_amd64.deb
   cd $HOME/project/src # Make sure we return to where we were
+  whereis chrome
 else
   echo "...Using Chrome from cache"
+  whereis chrome
 fi
 
 # be sure to add Chromes location to the PATH as part of your Start Command
-export PATH="${PATH}:/opt/render/project/.render/chrome/opt/google/chrome"
+# export PATH="${PATH}:/opt/render/project/.render/chrome/opt/google/chrome"
 
 # add your own build commands...
