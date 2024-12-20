@@ -113,9 +113,9 @@ async def get_proxies_async():
     for resp in responses:
         if resp:
             extracted = extract_proxies(resp)
-            selected = extracted[:5]
+            selected = extracted[:3]
             all_proxies.extend(selected)
-    return all_proxies[:20]
+    return all_proxies[:10]
 
 
 def get_proxies():
@@ -815,6 +815,7 @@ def fetch_job_description(url, max_retries=100):
 
     # If no success after all retries
     return None
+
 
 def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
     if cv_data_instance:

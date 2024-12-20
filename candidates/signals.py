@@ -110,10 +110,15 @@ def handle_cv_update(sender, instance, **kwargs):
     """
     Signal triggered when CVData or Template is created/updated.
     """
-    try:
-        cv = instance.cv
-    except AttributeError:
-        cv = instance.cv_set.first()
+    # Determine the associated CV instance
+    if sender == CVData:
+        cv = instance.cv  # Direct relation from CVData
+    elif sender == Template:
+        try:
+            cv = CV.objects.get(template=instance)  # Find CV using the template
+        except CV.DoesNotExist:
+            cv = None
 
+    # Generate PDF if both cv_data and template exist
     if cv and cv.cv_data and cv.template:
         generate_cv_pdf(cv)
