@@ -1331,7 +1331,7 @@ def generate_cv_pdf(cv):
         chromedriver_autoinstaller.install()
         driver = webdriver.Chrome(options=chrome_options)
         driver.get(url)
-        time.sleep(2)
+        time.sleep(5)
         # Wait for the container to load
         if not driver.find_elements(By.CLASS_NAME, "container"):
             raise ValueError("Page did not load correctly, container not found.")
