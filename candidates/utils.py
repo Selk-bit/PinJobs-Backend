@@ -145,9 +145,9 @@ def get_options():
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    # chrome_options.add_argument("--headless")
-    # chrome_options.add_argument('--no-sandbox')
-    # chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -1323,6 +1323,7 @@ def generate_cv_pdf(cv):
 
     # URL for the frontend resume preview
     url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
+    print(url)
     chrome_options = get_options()
     driver = None
 
@@ -1330,7 +1331,7 @@ def generate_cv_pdf(cv):
         chromedriver_autoinstaller.install()
         driver = webdriver.Chrome(options=chrome_options)
         driver.get(url)
-        time.sleep(1)
+        time.sleep(2)
         # Wait for the container to load
         if not driver.find_elements(By.CLASS_NAME, "container"):
             raise ValueError("Page did not load correctly, container not found.")
