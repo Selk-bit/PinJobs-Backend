@@ -104,21 +104,21 @@ def update_cv_name_after_cvdata_save(sender, instance, created, **kwargs):
         print(f"Error updating CV name after CVData save: {e}")
 
 
-@receiver(post_save, sender=CVData)
-@receiver(post_save, sender=Template)
-def handle_cv_update(sender, instance, **kwargs):
-    """
-    Signal triggered when CVData or Template is created/updated.
-    """
-    # Determine the associated CV instance
-    if sender == CVData:
-        cv = instance.cv  # Direct relation from CVData
-    elif sender == Template:
-        try:
-            cv = CV.objects.get(template=instance)  # Find CV using the template
-        except CV.DoesNotExist:
-            cv = None
-
-    # Generate PDF if both cv_data and template exist
-    if cv and cv.cv_data and cv.template:
-        generate_cv_pdf(cv)
+# @receiver(post_save, sender=CVData)
+# @receiver(post_save, sender=Template)
+# def handle_cv_update(sender, instance, **kwargs):
+#     """
+#     Signal triggered when CVData or Template is created/updated.
+#     """
+#     # Determine the associated CV instance
+#     if sender == CVData:
+#         cv = instance.cv  # Direct relation from CVData
+#     elif sender == Template:
+#         try:
+#             cv = CV.objects.get(template=instance)  # Find CV using the template
+#         except CV.DoesNotExist:
+#             cv = None
+#
+#     # Generate PDF if both cv_data and template exist
+#     if cv and cv.cv_data and cv.template:
+#         generate_cv_pdf(cv)
