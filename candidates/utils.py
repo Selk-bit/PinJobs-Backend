@@ -794,7 +794,7 @@ def fetch_job_description(url, max_retries=100):
         job_detail_url = construct_job_detail_url(url)
 
         # Use a ThreadPoolExecutor to run requests concurrently
-        with ThreadPoolExecutor(max_workers=21) as executor:
+        with ThreadPoolExecutor(max_workers=11) as executor:
             futures = []
             # 20 with proxies
             for p in proxies:
