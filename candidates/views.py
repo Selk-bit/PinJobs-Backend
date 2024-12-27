@@ -40,7 +40,14 @@ from drf_yasg import openapi
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from rest_framework import serializers
 from django.http import FileResponse, Http404
-
+import httpx
+from asgiref.sync import sync_to_async
+import aiofiles
+from .requests import AsyncRequest
+from django.http import HttpRequest
+from rest_framework.request import Request
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 class CandidateViewSet(viewsets.ModelViewSet):
     queryset = Candidate.objects.all()
@@ -934,15 +941,97 @@ class UpdateOrCreateCVDataView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class UploadCVView(APIView):
+# views.py (or wherever you keep your custom base view)
+from rest_framework.views import APIView
+from rest_framework.request import Request
+from django.http import HttpRequest
+
+# Import your custom AsyncRequest
+# Adjust the import path as needed to match your project structure
+from .requests import AsyncRequest
+
+
+class AsyncAPIView(APIView):
+    """
+    A base async class that:
+      - Provides its own as_view() returning an async function
+      - Overrides `initialize_request()` to force using AsyncRequest
+      - Implements an async `dispatch()` pipeline, so the final request
+        has `_async_authenticate()` available.
+    """
+
+    @classmethod
+    def as_view(cls, **initkwargs):
+        """
+        Build an async view function from scratch, without calling super().as_view().
+        This prevents DRF's default sync pipeline from overshadowing our custom code.
+        """
+        async def view(request, *args, **kwargs):
+            # Instantiate our view class
+            self = cls(**initkwargs)
+            # Call the async dispatch
+            return await self.dispatch(request, *args, **kwargs)
+
+        # Help DRF's schema or browsable API introspection:
+        view.cls = cls
+        view.initkwargs = initkwargs
+        return view
+
+    def initialize_request(self, request, *args, **kwargs):
+        """
+        Force DRF to create an AsyncRequest rather than rest_framework.request.Request.
+        This is critical so `request._async_authenticate()` actually exists.
+        """
+        parser_context = self.get_parser_context(request)
+        return AsyncRequest(
+            request,
+            parsers=self.get_parsers(),
+            authenticators=self.get_authenticators(),
+            negotiator=self.get_content_negotiator(),
+            parser_context=parser_context,
+        )
+
+    async def dispatch(self, request, *args, **kwargs):
+        # The default DRF dispatch sets self.headers = {}
+        # We must do this ourselves.
+        self.headers = {}
+
+        # ... your async logic ...
+        request = self.initialize_request(request, *args, **kwargs)
+        await self.async_initial(request, *args, **kwargs)
+
+        if request.method.lower() in self.http_method_names:
+            handler = getattr(self, request.method.lower(), self.http_method_not_allowed)
+        else:
+            handler = self.http_method_not_allowed
+
+        response = await handler(request, *args, **kwargs)
+        return self.finalize_response(request, response, *args, **kwargs)
+
+    async def async_initial(self, request, *args, **kwargs):
+        """
+        An async replacement for .initial().
+        """
+        await self.async_perform_authentication(request)
+        self.check_permissions(request)
+        self.check_throttles(request)
+
+    async def async_perform_authentication(self, request):
+        """
+        In an async pipeline, we call `_async_authenticate()` on our AsyncRequest.
+        """
+        await request._async_authenticate()
+
+
+class UploadCVView(AsyncAPIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser]  # The view expects multipart/form-data
+    parser_classes = [MultiPartParser]
 
     @swagger_auto_schema(
         operation_description="Upload a CV file to extract data and create/update the CV data.",
         manual_parameters=[
             openapi.Parameter(
-                'files',  # This should match the key used in request.FILES
+                'files',
                 openapi.IN_FORM,
                 description="CV file to upload",
                 type=openapi.TYPE_FILE,
@@ -950,59 +1039,65 @@ class UploadCVView(APIView):
             ),
         ],
         responses={
-            201: CVDataSerializer(),
+            201: CVSerializer(),
             400: openapi.Response(description='Please upload exactly one file.'),
             403: openapi.Response(description='Insufficient credits.'),
             500: openapi.Response(description='Failed to extract data from the external API.')
         },
         consumes=["multipart/form-data"],
     )
-    def post(self, request):
-        # Check if the candidate has enough credits
-        candidate = request.user.candidate
-        sufficient, credit_cost = has_sufficient_credits(candidate, 'upload_cv')
+    async def post(self, request):
+        candidate = await sync_to_async(lambda: request.user.candidate)()
+
+        # Check credits asynchronously
+        sufficient, credit_cost = await sync_to_async(has_sufficient_credits)(candidate, 'upload_cv')
         if not sufficient:
             return Response(
                 {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Ensure exactly one file is provided
+        # Ensure exactly one file
         if 'files' not in request.FILES or len(request.FILES.getlist('files')) != 1:
             return Response({'error': 'Please upload exactly one file.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        file = request.FILES['files']  # Get the single file
+        file = request.FILES['files']
 
-        # Send the file to the external API for extraction
-        response = requests.post(
-            settings.EXTERNAL_API_URL,
-            files={'files': file}
-        )
+        # Send file to external API asynchronously
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    settings.EXTERNAL_API_URL,
+                    files={'files': (file.name, file.read(), file.content_type)},
+                    timeout=None
+                )
+            except Exception as exc:
+                print(exc)
+                return Response({'error': f'Failed to contact the external API: {exc}'},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if response.status_code == 200:
-            extracted_data = response.json()  # Get the extracted data from the external API
+            extracted_data = response.json()
+            # Delete existing CV and CVData if they exist
+            existing_cv = await sync_to_async(CV.objects.filter)(candidate=candidate, cv_type=CV.BASE)
+            if await sync_to_async(existing_cv.exists)():
+                await sync_to_async(existing_cv.delete)()
 
-            # If the user already has a CV, delete the existing CV and CVData
-            if CV.objects.filter(candidate=candidate, cv_type=CV.BASE).exists():
-                existing_cv = CV.objects.get(candidate=candidate, cv_type=CV.BASE)
-                # existing_cv.cv_data.all().delete()
-                existing_cv.delete()  # Delete the existing CV
-
-            # Save the file in the 'Cvs' folder after successful data extraction
+            # Save file asynchronously
             folder = 'Cvs/'
-            file_name = default_storage.save(os.path.join(folder, file.name), file)
-            file_path = default_storage.path(file_name)
+            file_path = os.path.join(folder, file.name)
+            async with aiofiles.open(default_storage.path(file_path), 'wb') as f:
+                await f.write(file.read())
 
-            # Create a new CV for the authenticated candidate
-            cv = CV.objects.create(
+            # Create new CV
+            cv = await sync_to_async(CV.objects.create)(
                 candidate=candidate,
-                original_file=file_name  # Save the file path
+                original_file=file_path
             )
 
-            # Create new CVData from the extracted data
-            response_data = []
+            # Create new CVData from extracted data
             if extracted_data:
-                cv_data = CVData.objects.create(
+                await sync_to_async(CVData.objects.create)(
                     cv=cv,
                     title=extracted_data[0].get('title'),
                     name=extracted_data[0].get('name'),
@@ -1023,18 +1118,12 @@ class UploadCVView(APIView):
                     summary=extracted_data[0].get('summary')
                 )
 
-                # Serialize data and remove "id" and "cv" fields
-                serialized_data = CVSerializer(cv, context={'request': request}).data
-                # serialized_data.pop('id', None)
-                # serialized_data.pop('cv', None)
-                # response_data.append(serialized_data)
+                # Deduct credits asynchronously
+                await sync_to_async(deduct_credits)(candidate, 'upload_cv')
 
-                deduct_credits(candidate, 'upload_cv')
-
-                # Respond with the created CVData excluding "id" and "cv" fields
+                # Serialize and return response
+                serialized_data = await sync_to_async(lambda: CVSerializer(cv, context={'request': request}).data)()
                 return Response(serialized_data, status=status.HTTP_201_CREATED)
-            else:
-                return Response({'error': 'Failed to extract data from the external API.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({'error': 'Failed to extract data from the external API.'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
