@@ -28,6 +28,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 from PIL import Image
 from pdf2image import convert_from_path
 from selenium.webdriver.chrome.service import Service
@@ -1332,10 +1335,14 @@ def generate_cv_pdf(cv):
         chromedriver_autoinstaller.install()
         driver = webdriver.Chrome(options=chrome_options)
         driver.get(url)
-        time.sleep(1)
-        # Wait for the container to load
-        if not driver.find_elements(By.CLASS_NAME, "container"):
-            raise ValueError("Page did not load correctly, container not found.")
+
+        # Wait for the container to appear
+        try:
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "container"))
+            )
+        except TimeoutException:
+            raise ValueError("Page did not load correctly, container not found within the time limit.")
 
         # Generate the PDF
         response = driver.execute_cdp_cmd("Page.printToPDF", {
