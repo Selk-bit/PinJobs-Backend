@@ -235,8 +235,13 @@ class CandidateJobsView(APIView):
         job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
         job_search_map = {js.job_id: js.similarity_score for js in job_searches}
 
+        favorites = Favorite.objects.filter(candidate=candidate, job_id__in=job_ids)
+        favorite_jobs_ids = [favorite.job.id for favorite in favorites]
+        favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
+
         serializer = JobSerializer(paginated_jobs, many=True,
-                                   context={'job_search_map': job_search_map, 'request': request})
+                                   context={'job_search_map': job_search_map, 'favorites_map': favorites_map,
+                                            'request': request})
 
         return paginator.get_paginated_response(serializer.data)
 
@@ -254,10 +259,18 @@ class JobDetailView(APIView):
     def get(self, request, id):
         try:
             job = Job.objects.get(id=id)
-            job_ids = [job]
+            job_ids = [job.id]
+
             job_searches = JobSearch.objects.filter(job_id__in=job_ids)
             job_search_map = {js.job_id: js.similarity_score for js in job_searches}
-            serializer = JobSerializer(job, context={'job_search_map': job_search_map, 'request': request})
+
+            favorites = Favorite.objects.filter(job_id__in=job_ids)
+            favorite_jobs_ids = [favorite.job.id for favorite in favorites]
+            favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
+
+            serializer = JobSerializer(job, context={'job_search_map': job_search_map, "favorites_map": favorites_map,
+                                                     'request': request})
+
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Job.DoesNotExist:
             return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -297,11 +310,15 @@ class CandidateFavoriteJobsView(APIView):
         job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
         job_search_map = {js.job_id: js.similarity_score for js in job_searches}
 
+        favorites = Favorite.objects.filter(job_id__in=job_ids)
+        favorite_jobs_ids = [favorite.job.id for favorite in favorites]
+        favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
+
         # Serialize jobs with similarity score
         serializer = JobSerializer(
             paginated_results,
             many=True,
-            context={'job_search_map': job_search_map, 'request': request}
+            context={'job_search_map': job_search_map, "favorites_map": favorites_map, 'request': request}
         )
 
         return paginator.get_paginated_response(serializer.data)

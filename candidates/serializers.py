@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
-                     Price, Pack, AbstractTemplate)
+                     Price, Pack, AbstractTemplate, Favorite)
 from django.contrib.auth.models import User
 from rest_framework.response import Response
 
@@ -108,14 +108,19 @@ class CVDataSerializer(serializers.ModelSerializer):
 
 class JobSerializer(serializers.ModelSerializer):
     similarity_score = serializers.SerializerMethodField()
+    is_favorite = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
-        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score"]
+        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite"]
 
     def get_similarity_score(self, obj):
         job_search_map = self.context.get('job_search_map', {})
         return job_search_map.get(obj.id, None)
+
+    def get_is_favorite(self, obj):
+        favorites_map = self.context.get('favorites_map', {})
+        return favorites_map.get(obj.id, None)
 
 
 class CVSerializer(serializers.ModelSerializer):
