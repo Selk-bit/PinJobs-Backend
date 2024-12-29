@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
-                     Price, Pack, AbstractTemplate, Favorite)
+                     Price, Pack, AbstractTemplate)
 from django.contrib.auth.models import User
 from rest_framework.response import Response
 
@@ -108,34 +108,14 @@ class CVDataSerializer(serializers.ModelSerializer):
 
 class JobSerializer(serializers.ModelSerializer):
     similarity_score = serializers.SerializerMethodField()
-    is_favorite = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
-        fields = [
-            "id", "title", "description", "requirements", "company_name", "company_size",
-            "location", "linkedin_profiles", "employment_type", "original_url",
-            "min_salary", "max_salary", "benefits", "skills_required", "posted_date",
-            "industry", "job_type", "similarity_score", "is_favorite"
-        ]
+        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score"]
 
     def get_similarity_score(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            candidate = getattr(request.user, 'candidate', None)
-            if candidate:
-                job_search = JobSearch.objects.filter(job=obj, candidate=candidate).first()
-                if job_search:
-                    return job_search.similarity_score
-        return None
-
-    def get_is_favorite(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            candidate = getattr(request.user, 'candidate', None)
-            if candidate:
-                return Favorite.objects.filter(candidate=candidate, job=obj).exists()
-        return None
+        job_search_map = self.context.get('job_search_map', {})
+        return job_search_map.get(obj.id, None)
 
 
 class CVSerializer(serializers.ModelSerializer):
