@@ -33,7 +33,7 @@ from .utils import (paypal_client, is_valid_job_url, fetch_job_description, cons
                     construct_single_job_prompt, construct_candidate_profile, extract_job_id)
 from paypalcheckoutsdk.orders import OrdersCreateRequest, OrdersCaptureRequest
 from django.db import transaction
-from rest_framework.generics import ListAPIView, RetrieveAPIView
+from rest_framework.generics import ListAPIView
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -48,7 +48,6 @@ from django.http import HttpRequest
 from rest_framework.request import Request
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-
 
 class CandidateViewSet(viewsets.ModelViewSet):
     queryset = Candidate.objects.all()
@@ -191,7 +190,7 @@ class CandidateJobsView(APIView):
     permission_classes = [IsAuthenticated]
 
     class CustomPagination(PageNumberPagination):
-        page_size = 5
+        page_size = 30
         page_size_query_param = 'page_size'
         max_page_size = 100
 
@@ -224,48 +223,51 @@ class CandidateJobsView(APIView):
 
         # Get the filter params from request
         filters = request.query_params
+
         # Apply filters for the Job model using the JobFilter
         job_filter = JobFilter(filters, queryset=Job.objects.all())
         jobs = job_filter.qs
 
-        # Get all JobSearches for the candidate
-        job_searches = JobSearch.objects.filter(candidate=candidate)
-        # job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
-
-        # Serialize jobs with similarity score
-        results = []
-        for job in jobs:
-            job_data = JobSerializer(job, context={'request': request}).data
-            # Add similarity score if the candidate has a JobSearch for the job
-            # job_data['similarity_score'] = job_search_map.get(job.id, None)
-            results.append(job_data)
-
-        # Apply pagination
         paginator = self.CustomPagination()
-        paginated_results = paginator.paginate_queryset(results, request)
+        paginated_jobs = paginator.paginate_queryset(jobs, request)
 
-        return paginator.get_paginated_response(paginated_results)
+        job_ids = [job.id for job in paginated_jobs]
+        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
+        job_search_map = {js.job_id: js.similarity_score for js in job_searches}
+
+        serializer = JobSerializer(paginated_jobs, many=True,
+                                   context={'job_search_map': job_search_map, 'request': request})
+
+        return paginator.get_paginated_response(serializer.data)
 
 
-class JobDetailView(RetrieveAPIView):
-    queryset = Job.objects.all()
-    serializer_class = JobSerializer
+class JobDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Retrieve a single job by ID, including similarity score and favorite status.",
-        responses={200: JobSerializer()},
-        security=[{'Bearer': []}]
+        operation_description="Retrieve details of a specific job by its ID.",
+        responses={
+            200: JobSerializer(),
+            404: openapi.Response(description="Job not found.")
+        }
     )
-    def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
+    def get(self, request, id):
+        try:
+            job = Job.objects.get(id=id)
+            job_ids = [job]
+            job_searches = JobSearch.objects.filter(job_id__in=job_ids)
+            job_search_map = {js.job_id: js.similarity_score for js in job_searches}
+            serializer = JobSerializer(job, context={'job_search_map': job_search_map, 'request': request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Job.DoesNotExist:
+            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
 class CandidateFavoriteJobsView(APIView):
     permission_classes = [IsAuthenticated]
 
     class CustomPagination(PageNumberPagination):
-        page_size = 5
+        page_size = 10
         page_size_query_param = 'page_size'
         max_page_size = 100
 
@@ -285,24 +287,24 @@ class CandidateFavoriteJobsView(APIView):
         favorite_jobs = Favorite.objects.filter(candidate=candidate).select_related('job')
         jobs = [fav.job for fav in favorite_jobs]
 
-        # Get all JobSearches for the candidate
-        job_searches = JobSearch.objects.filter(candidate=candidate)
-        # job_search_map = {job_search.job_id: job_search.similarity_score for job_search in job_searches}
-
-        # Serialize jobs with similarity score
-        results = []
-        for job in jobs:
-            job_data = JobSerializer(job, context={'request': request}).data
-            # Add similarity score if the candidate has a JobSearch for the job
-            # job_data['similarity_score'] = job_search_map.get(job.id, None)
-            results.append(job_data)
-
         # Apply pagination
         paginator = self.CustomPagination()
-        paginated_results = paginator.paginate_queryset(results, request)
+        paginated_results = paginator.paginate_queryset(jobs, request)
 
-        return paginator.get_paginated_response(paginated_results)
+        job_ids = [job.id for job in paginated_results]
 
+        # Get all JobSearches for the candidate
+        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
+        job_search_map = {js.job_id: js.similarity_score for js in job_searches}
+
+        # Serialize jobs with similarity score
+        serializer = JobSerializer(
+            paginated_results,
+            many=True,
+            context={'job_search_map': job_search_map, 'request': request}
+        )
+
+        return paginator.get_paginated_response(serializer.data)
 
     @swagger_auto_schema(
         operation_description="Add a job to the candidate's favorites.",
