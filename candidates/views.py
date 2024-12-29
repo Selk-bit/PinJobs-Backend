@@ -33,7 +33,7 @@ from .utils import (paypal_client, is_valid_job_url, fetch_job_description, cons
                     construct_single_job_prompt, construct_candidate_profile, extract_job_id)
 from paypalcheckoutsdk.orders import OrdersCreateRequest, OrdersCaptureRequest
 from django.db import transaction
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -48,6 +48,7 @@ from django.http import HttpRequest
 from rest_framework.request import Request
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+
 
 class CandidateViewSet(viewsets.ModelViewSet):
     queryset = Candidate.objects.all()
@@ -244,6 +245,20 @@ class CandidateJobsView(APIView):
         paginated_results = paginator.paginate_queryset(results, request)
 
         return paginator.get_paginated_response(paginated_results)
+
+
+class JobDetailView(RetrieveAPIView):
+    queryset = Job.objects.all()
+    serializer_class = JobSerializer
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve a single job by ID, including similarity score and favorite status.",
+        responses={200: JobSerializer()},
+        security=[{'Bearer': []}]
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 
 class CandidateFavoriteJobsView(APIView):

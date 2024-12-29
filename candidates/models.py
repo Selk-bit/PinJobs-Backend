@@ -185,9 +185,9 @@ class Job(models.Model):
         blank=True,
         null=True
     )
-    original_url = models.CharField(max_length=1000)
+    original_url = models.CharField(max_length=5000)
 
-    salary_range = models.CharField(max_length=100, blank=True, null=True)
+    salary_range = models.CharField(max_length=500, blank=True, null=True)
     min_salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     max_salary = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
 
@@ -195,7 +195,7 @@ class Job(models.Model):
     skills_required = models.JSONField(blank=True, null=True)
     posted_date = models.DateField(blank=True, null=True)
     expiration_date = models.DateField(blank=True, null=True)
-    industry = models.CharField(max_length=100, blank=True, null=True)
+    industry = models.CharField(max_length=500, blank=True, null=True)
 
     JOB_TYPE_CHOICES = [
         ('full-time', 'Full-time'),
