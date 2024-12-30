@@ -115,7 +115,7 @@ class JobResource(resources.ModelResource):
     class Meta:
         model = Job
         fields = [
-            'title', 'description', 'requirements', 'company_name',
+            'title', 'description', 'requirements', 'company_name', 'company_logo',
             'company_size', 'location', 'linkedin_profiles', 'employment_type',
             'original_url', 'salary_range', 'min_salary', 'max_salary',
             'benefits', 'skills_required', 'posted_date', 'expiration_date',
