@@ -170,6 +170,8 @@ class Job(models.Model):
     description = models.TextField()
     requirements = models.JSONField(blank=True, null=True)
     company_name = models.CharField(max_length=255, blank=True, null=True)
+    company_logo = models.CharField(max_length=5000, blank=True, null=True)
+
     company_size = models.IntegerField(blank=True, null=True)
     location = models.CharField(max_length=255, blank=True, null=True)
     linkedin_profiles = models.JSONField(blank=True, null=True)
