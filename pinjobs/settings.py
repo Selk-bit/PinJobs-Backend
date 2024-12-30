@@ -138,27 +138,27 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 #     }
 # }
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'pinjobs_db',  # Replace with your PostgreSQL database name
-#         'USER': 'pinjobs_db_user',    # Replace with your PostgreSQL username
-#         'PASSWORD': 'CZ48By3MvLqZOXkytL4iFE8pYX3y9SLL', # Replace with your PostgreSQL password
-#         'HOST': 'dpg-ctdko2qlqhvc73d6r57g-a', # Replace with your PostgreSQL host
-#         'PORT': '5432',      # Default PostgreSQL port
-#     }
-# }
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'pinjobs_db_cmd4',  # Replace with your PostgreSQL database name
-        'USER': 'pinjobs_db_cmd4_user',    # Replace with your PostgreSQL username
-        'PASSWORD': 'Aa1ePUhUpOBHPz9quZx4QFEqRJWcTmOW', # Replace with your PostgreSQL password
-        'HOST': 'dpg-ctpfe852ng1s73drlp2g-a', # Replace with your PostgreSQL host
+        'NAME': 'pinjobs_db',  # Replace with your PostgreSQL database name
+        'USER': 'pinjobs_db_user',    # Replace with your PostgreSQL username
+        'PASSWORD': 'CZ48By3MvLqZOXkytL4iFE8pYX3y9SLL', # Replace with your PostgreSQL password
+        'HOST': 'dpg-ctdko2qlqhvc73d6r57g-a', # Replace with your PostgreSQL host
         'PORT': '5432',      # Default PostgreSQL port
     }
 }
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'pinjobs_db_cmd4',  # Replace with your PostgreSQL database name
+#         'USER': 'pinjobs_db_cmd4_user',    # Replace with your PostgreSQL username
+#         'PASSWORD': 'Aa1ePUhUpOBHPz9quZx4QFEqRJWcTmOW', # Replace with your PostgreSQL password
+#         'HOST': 'dpg-ctpfe852ng1s73drlp2g-a', # Replace with your PostgreSQL host
+#         'PORT': '5432',      # Default PostgreSQL port
+#     }
+# }
 os.environ["PATH"] += os.pathsep + os.path.join(os.getenv("HOME"), "bin")
 
 
