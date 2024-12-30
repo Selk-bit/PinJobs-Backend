@@ -152,10 +152,10 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'pinjobs_test_db',  # Replace with your PostgreSQL database name
-        'USER': 'pinjobs_test_db_user',    # Replace with your PostgreSQL username
-        'PASSWORD': '0rtufc1Pa8KocPqsJX07t5rScHvwAayP', # Replace with your PostgreSQL password
-        'HOST': 'dpg-ctpes1lds78s73d2g7s0-a', # Replace with your PostgreSQL host
+        'NAME': 'pinjobs_db_cmd4',  # Replace with your PostgreSQL database name
+        'USER': 'pinjobs_db_cmd4_user',    # Replace with your PostgreSQL username
+        'PASSWORD': 'Aa1ePUhUpOBHPz9quZx4QFEqRJWcTmOW', # Replace with your PostgreSQL password
+        'HOST': 'dpg-ctpfe852ng1s73drlp2g-a', # Replace with your PostgreSQL host
         'PORT': '5432',      # Default PostgreSQL port
     }
 }
