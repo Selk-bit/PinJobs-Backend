@@ -112,7 +112,7 @@ class JobSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Job
-        fields = ["id", "title", "description", "requirements", "company_name", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite"]
+        fields = ["id", "title", "description", "requirements", "company_name", "company_logo", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite"]
 
     def get_similarity_score(self, obj):
         job_search_map = self.context.get('job_search_map', {})
