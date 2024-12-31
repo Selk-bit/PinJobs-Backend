@@ -226,7 +226,10 @@ class CandidateJobsView(APIView):
 
         # Apply filters for the Job model using the JobFilter
         job_filter = JobFilter(filters, queryset=Job.objects.all())
-        jobs = job_filter.qs
+        jobs = job_filter.qs.order_by(
+            F('posted_date').desc(nulls_last=True),  # Latest posted_date first, nulls pushed to bottom
+            '-created_at'  # Secondary sorting by creation date in descending order
+        )
 
         paginator = self.CustomPagination()
         paginated_jobs = paginator.paginate_queryset(jobs, request)
