@@ -26,7 +26,7 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import update_session_auth_hash
 import django_filters
-from django.db.models import Q
+from django.db.models import Q, F
 from rest_framework.pagination import PageNumberPagination
 from datetime import datetime
 from .utils import (paypal_client, is_valid_job_url, fetch_job_description, construct_tailored_job_prompt,
@@ -230,7 +230,7 @@ class CandidateJobsView(APIView):
             F('posted_date').desc(nulls_last=True),  # Latest posted_date first, nulls pushed to bottom
             '-created_at'  # Secondary sorting by creation date in descending order
         )
-
+        
         paginator = self.CustomPagination()
         paginated_jobs = paginator.paginate_queryset(jobs, request)
 
