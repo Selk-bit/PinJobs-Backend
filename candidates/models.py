@@ -213,6 +213,11 @@ class Job(models.Model):
         choices=JOB_TYPE_CHOICES,
         default='full-time'
     )
+    clicked_by = models.ManyToManyField(
+        'Candidate',
+        through='JobClick',
+        related_name='clicked_jobs'
+    )
     job_id = models.CharField(max_length=50, unique=True, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -226,19 +231,21 @@ class JobSearch(models.Model):
     job = models.ForeignKey(Job, on_delete=models.CASCADE)
     similarity_score = models.FloatField()
     search_date = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(
-        max_length=50,
-        choices=[
-            ('matched', 'Matched'),
-            ('applied', 'Applied')
-        ],
-        default='matched'
-    )
+    is_applied = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Job search for {self.candidate} - {self.job.title}"
+
+
+class JobClick(models.Model):
+    job = models.ForeignKey(Job, on_delete=models.CASCADE)
+    candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE)
+    clicked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('job', 'candidate')  # Ensure one click per candidate per job
 
 
 class Payment(models.Model):
