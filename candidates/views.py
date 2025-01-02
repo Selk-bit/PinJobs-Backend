@@ -1,6 +1,6 @@
 from rest_framework import viewsets
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, CreditOrder,
-                     Pack, Price, Favorite, AbstractTemplate)
+                     Pack, Price, Favorite, AbstractTemplate, JobClick)
 from .serializers import (CandidateSerializer, CVSerializer, CVDataSerializer, JobSerializer, JobSearchSerializer,
                           PaymentSerializer, CreditPurchaseSerializer, TemplateSerializer, PackSerializer,
                           AbstractTemplateSerializer)
@@ -230,21 +230,22 @@ class CandidateJobsView(APIView):
             F('posted_date').desc(nulls_last=True),  # Latest posted_date first, nulls pushed to bottom
             '-created_at'  # Secondary sorting by creation date in descending order
         )
-        
+
         paginator = self.CustomPagination()
         paginated_jobs = paginator.paginate_queryset(jobs, request)
 
         job_ids = [job.id for job in paginated_jobs]
         job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
-        job_search_map = {js.job_id: js.similarity_score for js in job_searches}
+        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        applies_map = {js.job_id: js.is_applied for js in job_searches}
 
         favorites = Favorite.objects.filter(candidate=candidate, job_id__in=job_ids)
         favorite_jobs_ids = [favorite.job.id for favorite in favorites]
         favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
 
         serializer = JobSerializer(paginated_jobs, many=True,
-                                   context={'job_search_map': job_search_map, 'favorites_map': favorites_map,
-                                            'request': request})
+                                   context={'similarity_scores_map': similarity_scores_map, 'applies_map': applies_map,
+                                            'favorites_map': favorites_map, 'request': request})
 
         return paginator.get_paginated_response(serializer.data)
 
@@ -265,14 +266,16 @@ class JobDetailView(APIView):
             job_ids = [job.id]
 
             job_searches = JobSearch.objects.filter(job_id__in=job_ids)
-            job_search_map = {js.job_id: js.similarity_score for js in job_searches}
+            similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+            applies_map = {js.job_id: js.is_applied for js in job_searches}
 
             favorites = Favorite.objects.filter(job_id__in=job_ids)
             favorite_jobs_ids = [favorite.job.id for favorite in favorites]
             favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
 
-            serializer = JobSerializer(job, context={'job_search_map': job_search_map, "favorites_map": favorites_map,
-                                                     'request': request})
+            serializer = JobSerializer(job, context={'similarity_scores_map': similarity_scores_map,
+                                                     'applies_map': applies_map,
+                                                     "favorites_map": favorites_map, 'request': request})
 
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Job.DoesNotExist:
@@ -311,7 +314,8 @@ class CandidateFavoriteJobsView(APIView):
 
         # Get all JobSearches for the candidate
         job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
-        job_search_map = {js.job_id: js.similarity_score for js in job_searches}
+        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        applies_map = {js.job_id: js.is_applied for js in job_searches}
 
         favorites = Favorite.objects.filter(job_id__in=job_ids)
         favorite_jobs_ids = [favorite.job.id for favorite in favorites]
@@ -321,7 +325,8 @@ class CandidateFavoriteJobsView(APIView):
         serializer = JobSerializer(
             paginated_results,
             many=True,
-            context={'job_search_map': job_search_map, "favorites_map": favorites_map, 'request': request}
+            context={'similarity_scores_map': similarity_scores_map, 'applies_map': applies_map,
+                     "favorites_map": favorites_map, 'request': request}
         )
 
         return paginator.get_paginated_response(serializer.data)
@@ -361,6 +366,88 @@ class CandidateFavoriteJobsView(APIView):
             return Response({"detail": "Job added to favorites."}, status=status.HTTP_201_CREATED)
         else:
             return Response({"detail": "Job is already in favorites."}, status=status.HTTP_200_OK)
+
+
+class CandidateAppliedJobsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    class CustomPagination(PageNumberPagination):
+        page_size = 10
+        page_size_query_param = 'page_size'
+        max_page_size = 100
+
+    @swagger_auto_schema(
+        operation_description="Get the list of applied jobs for the authenticated candidate.",
+        manual_parameters=[
+            openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
+            openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of items per page", type=openapi.TYPE_INTEGER),
+        ],
+        responses={200: JobSerializer(many=True)}
+    )
+    def get(self, request):
+        # Get the authenticated candidate
+        candidate = request.user.candidate
+
+        # Get applied jobs for the candidate
+        applied_job_searches = JobSearch.objects.filter(candidate=candidate, is_applied=True).select_related('job')
+        applied_jobs = [js.job for js in applied_job_searches]
+
+        # Apply pagination
+        paginator = self.CustomPagination()
+        paginated_results = paginator.paginate_queryset(applied_jobs, request)
+
+        job_ids = [job.id for job in paginated_results]
+
+        # Get similarity scores for the candidate
+        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
+        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        applies_map = {js.job_id: js.is_applied for js in job_searches}
+
+        favorites = Favorite.objects.filter(job_id__in=job_ids)
+        favorite_jobs_ids = [favorite.job.id for favorite in favorites]
+        favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
+
+        # Serialize jobs with similarity score
+        serializer = JobSerializer(
+            paginated_results,
+            many=True,
+            context={'similarity_scores_map': similarity_scores_map, 'applies_map': applies_map,
+                     "favorites_map": favorites_map, 'request': request}
+        )
+
+        return paginator.get_paginated_response(serializer.data)
+
+    @swagger_auto_schema(
+        operation_description="Toggle the applied status for a specific job for the authenticated candidate. The candidate must have a similarity score for the job.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['job_id'],
+            properties={
+                'job_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID of the job'),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Applied status toggled successfully.",
+                examples={"application/json": {"job_id": 1, "is_applied": True}}
+            ),
+            404: openapi.Response(description="Job not found."),
+            400: openapi.Response(description="Job is not eligible for applied status.")
+        }
+    )
+    def post(self, request):
+        job_id = request.data.get('job_id')
+        candidate = request.user.candidate
+        job = get_object_or_404(Job, id=job_id)
+        job_search = JobSearch.objects.filter(candidate=candidate, job=job).first()
+
+        if not job_search or job_search.similarity_score is None:
+            return Response({'error': 'Similarity score is not available for this job. get the score at least before marking it as applied.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        job_search.is_applied = not job_search.is_applied
+        job_search.save()
+
+        return Response({'job_id': job_id, 'is_applied': job_search.is_applied}, status=status.HTTP_200_OK)
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -2402,6 +2489,128 @@ class GetFavoriteScoresView(APIView):
             return Response({"detail": "Job searches created successfully.", "scores": scores}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class GetJobScoresByIdsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve similarity scores for specific job IDs.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'job_ids': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Items(type=openapi.TYPE_INTEGER),
+                    description='List of job IDs (max 10).'
+                ),
+            },
+            required=['job_ids']
+        ),
+        responses={
+            200: openapi.Response(
+                description="Similarity scores retrieved successfully.",
+                examples={
+                    "application/json": {
+                        "detail": "Similarity scores retrieved successfully.",
+                        "scores": [
+                            {"id": 1, "score": 0.85},
+                            {"id": 2, "score": 0.92}
+                        ]
+                    }
+                }
+            ),
+            400: openapi.Response(description="Bad Request - Too many job IDs or invalid input."),
+            500: openapi.Response(description="Internal server error.")
+        }
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+
+        # Validate job_ids in the request body
+        job_ids = request.data.get("job_ids", [])
+        if not isinstance(job_ids, list) or len(job_ids) > 10:
+            return Response(
+                {"error": "Provide a list of up to 10 job IDs."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+        if not base_cv or not hasattr(base_cv, 'cv_data'):
+            return Response(
+                {'error': 'Base CV or associated data is missing.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        candidate_profile = construct_candidate_profile(base_cv.cv_data)
+        jobs_to_compare = Job.objects.filter(id__in=job_ids)
+
+        if not jobs_to_compare.exists():
+            return Response({"detail": "No valid jobs found for the provided IDs."}, status=status.HTTP_400_BAD_REQUEST)
+
+        jobs_data = [
+            {
+                "id": job.id,
+                "title": job.title,
+                "description": job.description,
+                "requirements": ', '.join(job.requirements or []),
+                "skills": ', '.join(job.skills_required or [])
+            }
+            for job in jobs_to_compare
+        ]
+
+        prompt = construct_similarity_prompt(candidate_profile, jobs_data)
+
+        try:
+            gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            scores = json.loads(gemini_response)
+
+            for score_data in scores:
+                job_id = score_data['id']
+                score = score_data['score']
+
+                job = Job.objects.get(id=job_id)
+                JobSearch.objects.update_or_create(
+                    candidate=candidate,
+                    job=job,
+                    defaults={"similarity_score": score}
+                )
+
+            return Response(
+                {"detail": "Similarity scores retrieved successfully.", "scores": scores},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class JobClickView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Track a click for the specified job.",
+        responses={
+            200: openapi.Response(description="Click tracked successfully."),
+            400: openapi.Response(description="Bad Request."),
+            404: openapi.Response(description="Job not found."),
+        },
+    )
+    def post(self, request, job_id):
+        candidate = request.user.candidate
+
+        try:
+            job = Job.objects.get(id=job_id)
+        except Job.DoesNotExist:
+            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if the candidate has already clicked this job
+        _, created = JobClick.objects.get_or_create(job=job, candidate=candidate)
+        if created:
+            return Response({"detail": "Click tracked successfully."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Click already tracked for this candidate."}, status=status.HTTP_200_OK)
+
 
 
 class UserTemplateView(APIView):

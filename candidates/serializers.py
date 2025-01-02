@@ -109,19 +109,27 @@ class CVDataSerializer(serializers.ModelSerializer):
 class JobSerializer(serializers.ModelSerializer):
     similarity_score = serializers.SerializerMethodField()
     is_favorite = serializers.SerializerMethodField()
+    is_applied = serializers.SerializerMethodField()
+    click_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
-        fields = ["id", "title", "description", "requirements", "company_name", "company_logo", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite"]
+        fields = ["id", "title", "description", "requirements", "company_name", "company_logo", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite", "is_applied", "click_count"]
 
     def get_similarity_score(self, obj):
-        job_search_map = self.context.get('job_search_map', {})
-        return job_search_map.get(obj.id, None)
+        similarity_scores_map = self.context.get('similarity_scores_map', {})
+        return similarity_scores_map.get(obj.id, None)
 
     def get_is_favorite(self, obj):
         favorites_map = self.context.get('favorites_map', {})
         return favorites_map.get(obj.id, None)
 
+    def get_is_applied(self, obj):
+        applies_map = self.context.get('applies_map', {})
+        return applies_map.get(obj.id, False)
+
+    def get_click_count(self, obj):
+        return obj.clicked_by.count()
 
 class CVSerializer(serializers.ModelSerializer):
     job = JobSerializer()

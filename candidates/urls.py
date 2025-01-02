@@ -1,9 +1,9 @@
 from django.urls import path, include
 from .views import (
     SignUpView, LoginView, UploadCVView, LinkedInCVView, JobDescriptionCVView, LogoutView, ChangePasswordView,
-    CandidateJobsView, CVDataView, TemplateDetailView, TopUpView, TopUpConfirmView,
-    JobLinkCVView, TailoredCVView, ExistingJobCVView, UserTemplateView,
-    CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView,
+    CandidateJobsView, CVDataView, TemplateDetailView, TopUpView, TopUpConfirmView, CandidateAppliedJobsView,
+    JobLinkCVView, TailoredCVView, ExistingJobCVView, UserTemplateView, GetJobScoresByIdsView,
+    CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView, JobClickView,
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView
 )
 from django.contrib.auth import views as auth_views
@@ -40,6 +40,9 @@ urlpatterns = [
     path('jobs/favorites/', CandidateFavoriteJobsView.as_view(), name='candidate-favorite-jobs'),
     path('jobs/favorites/<int:job_id>/', RemoveFavoriteView.as_view(), name='remove_favorite'),
     path('jobs/favorites/scores/', GetFavoriteScoresView.as_view(), name='favorite_scores'),
+    path('jobs/applied/', CandidateAppliedJobsView.as_view(), name='candidate-applied-jobs'),
+    path('jobs/scores/', GetJobScoresByIdsView.as_view(), name='job_scores_by_ids'),
+    path('jobs/clicks/<int:job_id>/', JobClickView.as_view(), name='job-click'),
 
     path('templates/', AbstractTemplateListView.as_view(), name='abstract-template-list'),
 
