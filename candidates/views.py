@@ -1581,7 +1581,6 @@ class ExistingJobCVView(APIView):
                 {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
                 status=status.HTTP_403_FORBIDDEN
             )
-
         # Ensure the base CV exists and fetch its CVData
         base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
         if not base_cv or not hasattr(base_cv, 'cv_data'):
