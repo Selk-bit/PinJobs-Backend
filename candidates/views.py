@@ -1213,7 +1213,7 @@ class UploadCVView(AsyncAPIView):
             file_path = os.path.join(folder, file_name)
             os.makedirs(folder, exist_ok=True)
             async with aiofiles.open(file_path, 'wb') as f:
-                await f.write(await file.read())
+                await f.write(file.read())
 
             # Create new CV
             cv = await sync_to_async(CV.objects.create)(
