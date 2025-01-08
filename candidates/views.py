@@ -1210,6 +1210,7 @@ class UploadCVView(AsyncAPIView):
             # Save file asynchronously
             folder = 'Cvs/'
             file_path = os.path.join(folder, file.name)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             async with aiofiles.open(default_storage.path(file_path), 'wb') as f:
                 await f.write(file.read())
 
