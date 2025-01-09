@@ -238,3 +238,22 @@ SWAGGER_SETTINGS = {
     },
     'USE_SESSION_AUTH': False,
 }
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage"
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+    }
+}
+
+
+AWS_ACCESS_KEY_ID = '002dee4590e8bfb0000000007'
+AWS_SECRET_ACCESS_KEY = 'K002I2vDUe2cWFBNUWka949z5utXCak'
+AWS_STORAGE_BUCKET_NAME = 'PinJobs'
+AWS_S3_REGION_NAME = 'us-west-002'
+AWS_S3_ENDPOINT = f's3.{AWS_S3_REGION_NAME}.backblazeb2.com'
+AWS_S3_ENDPOINT_URL = f'https://{AWS_S3_ENDPOINT}'
+AWS_DEFAULT_ACL = 'public-read'
+AWS_LOCATION = 'media/'

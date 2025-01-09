@@ -32,11 +32,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
 from PIL import Image
-from pdf2image import convert_from_path
 from selenium.webdriver.chrome.service import Service
 import chromedriver_autoinstaller
 from django.core.files import File
 import base64
+import tempfile
+from django.core.files.base import ContentFile
+from io import BytesIO
+from pdf2image import convert_from_bytes
 
 
 ua = UserAgent()
@@ -526,8 +529,6 @@ def construct_prompt(candidate_profile, jobs_data):
     - Respond with a JSON array containing objects for each job, following the specified JSON format below.
     - Add a key called "score" in each job's object, representing the matching score (use a float value for precision).
     - Do not include any comments or explanations in your response. Only provide the JSON array.
-    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
-    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
     
     **JSON Format:**
 
@@ -829,6 +830,9 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
             "age": cv_data_instance.age,
             "work": cv_data_instance.work,
             "educations": cv_data_instance.educations,
+            "projects": cv_data_instance.projects,
+            "interests": cv_data_instance.interests,
+            "certifications": cv_data_instance.certifications,
         }
 
         # Construct the prompt to ask for missing fields only
@@ -837,18 +841,18 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
             The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
             Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
 
-            Leave fields like work experiences, education, and other existing fields empty, except for the missing fields indicated below:
+            Follow the instructions indicated below for each field :
 
-            **Skills**: Include a list of relevant hard skills based on the job description, replacing the original skills in the profile with the ones mentioned in the job description intelligently in a way that aligns with the candidate's experience and education. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
-            **Social**: Include a list of relevant soft skills based on the job description.
-            **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
-            **Languages**: Include any languages that could be relevant for the job.
-            **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
-            **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
-            **Interests**: Randomly generate a few interests.
+            **Skills**: Include a list of relevant hard skills based on the job description, replacing the original skills in the profile with the ones mentioned in the job description intelligently in a way that aligns with the candidate's experience and education. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set, and ALL skills should be written in the language of the job description.
+            **Social**: Include a list of relevant soft skills based on the job description, written in the language of the job description.
+            **Languages**: Include any languages that could be relevant for the job, written in the language of the job description.
+            **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims, nor mentioning the company name. Write the summary in the language of the job description.
             **Age**: Leave age value as I passed it without any change.
-            **Work**: Leave work array as I passed it without any change.
-            **Educations**: Leave educations array as I passed it without any change.
+            **Work**: If the language of the job description matched the language of work experiences I passed (assuming that I passed it non-empty, otherwise leave it empty), reformulate work experiences with putting an emphasis on areas that corresponds with the job, without adding or removing anything, just reformulating. And if the job description was in a different language, translate work experiences text to that language.
+            **Educations**: If the language of the job description matched the language of educations I passed (assuming that I passed it non-empty, otherwise leave it empty), leave educations text as I passed it, and if it didn't match the language, translate educations to the language of the job description.
+            **Projects**: If the language of the job description matched the language of projects I passed (assuming that I passed it non-empty, otherwise leave it empty), leave projects text as I passed it, and if it didn't match the language, translate projects to the language of the job description.
+            **Certifications**: If the language of the job description matched the language of certifications I passed (assuming that I passed it non-empty, otherwise leave it empty), leave certifications text as I passed it, and if it didn't match the language, translate certifications to the language of the job description.
+            **Interests**: If the language of the job description matched the language of interests I passed (assuming that I passed it non-empty, otherwise leave it empty), leave interests text as I passed it, and if it didn't match the language, translate interests to the language of the job description.
 
             If a city or country is found in the job description, use it as the candidate's location.
 
@@ -862,6 +866,9 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
                 "city": "<city>",
                 "work": {missing_fields['work']},
                 "educations": {missing_fields['educations']},
+                "projects": {missing_fields['projects']},
+                "interests": {missing_fields['interests']},
+                "certifications": {missing_fields['certifications']},
                 "languages": [
                     {{
                         "language": "<language_name>",
@@ -877,27 +884,6 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
                 "social": [
                     {{
                         "skill": "<soft_skill_name>"
-                    }}
-                ],
-                "certifications": [
-                    {{
-                        "certification": "<certification_title>",
-                        "institution": "<website_name>",
-                        "link": "<certification_link>",
-                        "date": null
-                    }}
-                ],
-                "projects": [
-                    {{
-                        "project_name": "<project_name>",
-                        "description": "<project_description>",
-                        "start_date": "",
-                        "end_date": ""
-                    }}
-                ],
-                "interests": [
-                    {{
-                        "interest": "<interest_1>"
                     }}
                 ],
                 "headline": null,
@@ -919,11 +905,8 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
 
             **Skills**: Include a list of relevant hard skills based on the job description, ensuring they align with the requirements without exaggerating. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set.
             **Social**: Include a list of relevant soft skills based on the job description.
-            **Certifications**: Add relevant online certifications that could be helpful for the job role, choosing from widely available sources like Coursera, or other similar websites you can think of.
             **Languages**: Include any languages that could be relevant for the job.
             **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims.
-            **Projects**: Add one or two relevant projects, keeping them realistic and plausible for a candidate with similar qualifications.
-            **Interests**: Randomly generate a few interests.
 
             If a city or country is found in the job description, use it as the candidate's location.
 
@@ -954,31 +937,10 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
                         "skill": "<soft_skill_name>"
                     }}
                 ],
-                "certifications": [
-                    {{
-                        "certification": "<certification_title>",
-                        "institution": "<website_name>",
-                        "link": "<certification_link>",
-                        "date": null
-                    }}
-                ],
-                "projects": [
-                    {{
-                        "project_name": "<project_name>",
-                        "description": "<project_description>",
-                        "start_date": "",
-                        "end_date": ""
-                    }}
-                ],
-                "interests": [
-                    {{
-                        "interest": "<interest_1>"
-                    }}
-                ],
                 "headline": null,
                 "summary": "<tailored_summary>"
             }}
-
+            
             Here is the job description:
             {job_description}
         """
@@ -1079,8 +1041,6 @@ def construct_single_job_prompt(candidate_profile, job_description, job_url):
     - Respond with a JSON object following the specified JSON format below.
     - Add a key called "score" in the object, representing the matching score (use a float value for precision).
     - Do not include any comments or explanations in your response. Only provide the JSON object.
-    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
-    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
 
     **JSON Format:**
 
@@ -1176,8 +1136,6 @@ def construct_only_score_job_prompt(candidate_profile, job_description):
     **Instructions:**
     - Calculate the total score out of 100.
     - Respond with a JSON object containing only the "score" key.
-    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
-    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
 
     **Candidate Profile:**
     {json.dumps(CVDataSerializer(candidate_profile).data, indent=4, ensure_ascii=False)}
@@ -1295,8 +1253,6 @@ def construct_similarity_prompt(candidate_profile, jobs_data):
     **Instructions:**
     - For each job, calculate the total score out of 100 points, allowing for decimal values down to .001 to increase granularity. Please be as strict and accurate as possible following the specified criteria. 
     - Respond with a JSON array containing objects for each job, including only the job ID and the calculated score.
-    - If the candidate's job title and the job's title are in the same general field and involve similar core responsibilities or functions (even if not identical), ensure that the final score does not fall below 50. In other words, if after scoring all criteria you end up with a value below 50, but the titles indicate closely related professional domains and overlapping job duties (e.g., "Fullstack Developer" vs "Software Engineer"), adjust the final score up to at least 50.
-    - Only if the candidate is truly in a distinctly different domain (e.g., "Accountant" vs "Software Engineer") should the final score naturally fall below 50.
 
     **JSON Format:**
     [
@@ -1326,8 +1282,7 @@ def generate_cv_pdf(cv):
         raise ValueError("CV must have both data and template to generate PDF")
 
     # URL for the frontend resume preview
-    url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
-    print(url)
+    url = f"{FRONTEND_PREVIEW_URL}59"
     chrome_options = get_options()
     driver = None
 
@@ -1344,23 +1299,13 @@ def generate_cv_pdf(cv):
         except TimeoutException:
             raise ValueError("Page did not load correctly, container not found within the time limit.")
 
-        # Generate the PDF
+        # Generate the PDF data as a base64-encoded string
         response = driver.execute_cdp_cmd("Page.printToPDF", {
             "printBackground": True,
             "preferCSSPageSize": True,
             "displayHeaderFooter": False
         })
         pdf_data = base64.b64decode(response['data'])
-
-        # Define paths
-        pdf_filename = f"cv_{cv.id}.pdf"
-        pdf_path = os.path.join(settings.MEDIA_ROOT, "Cvs/pdf/", pdf_filename)
-        thumbnail_filename = f"thumbnail_{cv.id}.png"
-        thumbnail_path = os.path.join(settings.MEDIA_ROOT, "Cvs/thumbnails/", thumbnail_filename)
-
-        # Ensure directories exist
-        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
-        os.makedirs(os.path.dirname(thumbnail_path), exist_ok=True)
 
         # Remove previous files if they exist
         if cv.generated_pdf:
@@ -1373,17 +1318,20 @@ def generate_cv_pdf(cv):
             if os.path.exists(old_thumbnail_path):
                 os.remove(old_thumbnail_path)
 
-        # Save the new PDF
-        with open(pdf_path, "wb") as pdf_file:
-            pdf_file.write(pdf_data)
-        with open(pdf_path, "rb") as pdf_file:
-            cv.generated_pdf.save(pdf_filename, File(pdf_file), save=False)
+        # Save the new PDF to Django's storage
+        pdf_filename = f"cv_{cv.id}.pdf"
+        pdf_path = pdf_filename
+        cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=False)
 
-        # Generate thumbnail from the first page
-        images = convert_from_path(pdf_path, first_page=1, last_page=1)
-        images[0].save(thumbnail_path, "PNG")
-        with open(thumbnail_path, "rb") as thumbnail_file:
-            cv.thumbnail.save(thumbnail_filename, File(thumbnail_file), save=False)
+        # Generate thumbnail directly from the PDF data (using `convert_from_bytes`)
+        images = convert_from_bytes(pdf_data, first_page=1, last_page=1)
+        thumbnail_filename = f"thumbnail_{cv.id}.png"
+        thumbnail_path = thumbnail_filename
+
+        # Save the thumbnail to Django's storage
+        thumbnail_io = BytesIO()
+        images[0].save(thumbnail_io, format="PNG")
+        cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
 
         # Save the CV instance after all updates
         cv.save()
