@@ -28,7 +28,7 @@ DEFAULT_TEMPLATE_DATA = {
     'company_logo': {
         'url': '',
         'border': False,
-        'hidden': False,
+        'hidden': True,
         'grayscale': False,
         'size': 90,
         'aspectRatio': 1,

@@ -1208,17 +1208,16 @@ class UploadCVView(AsyncAPIView):
                 await sync_to_async(existing_cv.delete)()
 
             # Save file asynchronously
-            folder = os.path.abspath('Cvs/')
-            file_name = os.path.basename(file.name)
-            file_path = os.path.join(folder, file_name)
-            os.makedirs(folder, exist_ok=True)
-            async with aiofiles.open(file_path, 'wb') as f:
-                await f.write(file.read())
-
+            # folder = os.path.abspath('Cvs/')
+            # file_name = os.path.basename(file.name)
+            # file_path = os.path.join(folder, file_name)
+            # os.makedirs(folder, exist_ok=True)
+            # async with aiofiles.open(file_path, 'wb') as f:
+            #     await f.write(file.read())
             # Create new CV
             cv = await sync_to_async(CV.objects.create)(
                 candidate=candidate,
-                original_file=file_path
+                original_file=file
             )
 
             # Create new CVData from extracted data
