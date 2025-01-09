@@ -7,7 +7,7 @@ class Candidate(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
-    phone = models.CharField(max_length=20, blank=True, null=True)
+    phone = models.CharField(max_length=100, blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)  # New field for country
@@ -142,7 +142,7 @@ class CVData(models.Model):
     title = models.CharField(max_length=100, blank=True, null=True)
     name = models.CharField(max_length=100, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
-    phone = models.CharField(max_length=20, blank=True, null=True)
+    phone = models.CharField(max_length=100, blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     yoe = models.CharField(max_length=100, blank=True, null=True)
