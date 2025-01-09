@@ -1282,7 +1282,7 @@ def generate_cv_pdf(cv):
         raise ValueError("CV must have both data and template to generate PDF")
 
     # URL for the frontend resume preview
-    url = f"{FRONTEND_PREVIEW_URL}59"
+    url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
     chrome_options = get_options()
     driver = None
 
