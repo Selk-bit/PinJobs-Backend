@@ -4,7 +4,8 @@ from .views import (
     CandidateJobsView, CVDataView, TemplateDetailView, TopUpView, TopUpConfirmView, CandidateAppliedJobsView,
     JobLinkCVView, TailoredCVView, ExistingJobCVView, UserTemplateView, GetJobScoresByIdsView,
     CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView, JobClickView,
-    UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView
+    UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView,
+    RecentSearchTermsView
 )
 from django.contrib.auth import views as auth_views
 
@@ -49,5 +50,7 @@ urlpatterns = [
     path('credits/create-order/', TopUpView.as_view(), name='top-up'),
     path('credits/confirm-order/', TopUpConfirmView.as_view(), name='top-up-confirm'),
     path('credits/prices/', PackPricesView.as_view(), name='top-up-confirm'),
+
+    path('searches/recent/', RecentSearchTermsView.as_view(), name='recent-search-terms'),
 ]
 

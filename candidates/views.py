@@ -1,9 +1,9 @@
 from rest_framework import viewsets
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, CreditOrder,
-                     Pack, Price, Favorite, AbstractTemplate, JobClick)
+                     Pack, Price, Favorite, AbstractTemplate, JobClick, Ad, GeneralSetting, SearchTerm)
 from .serializers import (CandidateSerializer, CVSerializer, CVDataSerializer, JobSerializer, JobSearchSerializer,
                           PaymentSerializer, CreditPurchaseSerializer, TemplateSerializer, PackSerializer,
-                          AbstractTemplateSerializer)
+                          AbstractTemplateSerializer, AdSerializer)
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -194,6 +194,57 @@ class CandidateJobsView(APIView):
         page_size_query_param = 'page_size'
         max_page_size = 100
 
+    def get_ads_per_page(self, total_jobs):
+        """
+        Calculate the number of ads to show based on job count and configuration.
+        """
+        config = GeneralSetting.objects.get_configuration()
+        ads_per_page = config.ads_per_page  # Configured value
+
+        # Calculate ads by ratio (1 ad per 5 jobs)
+        ads_by_ratio = max(1, total_jobs // 5)
+
+        # Use the minimum between ratio-based ads and the configured max ads
+        return min(ads_by_ratio, ads_per_page)
+
+    def distribute_ads(self, jobs, ads, ads_per_page):
+        """
+        Distribute ads evenly among jobs with a reasonable distance.
+        """
+        if not ads or ads_per_page == 0:
+            return jobs
+
+        results = list(jobs)
+        ad_count = len(ads)
+        total_positions = len(results) + ad_count
+        step = max(1, total_positions // (ad_count + 1))
+
+        ad_index = 0
+        for i in range(step, total_positions, step):
+            if ad_index < ad_count:
+                index = min(i, len(results))  # Ensure we don’t go out of bounds
+                results.insert(index, ads[ad_index])
+                ad_index += 1
+
+        return results
+
+    def save_search_term(self, candidate, search_term):
+        """
+        Save or update the search term for the candidate.
+        """
+        if not search_term:
+            return
+
+        # Check if the search term already exists
+        existing_term = SearchTerm.objects.filter(candidate=candidate, term__iexact=search_term).first()
+        if existing_term:
+            # Update the `last_searched_at` field
+            existing_term.last_searched_at = now()
+            existing_term.save()
+        else:
+            # Create a new search term
+            SearchTerm.objects.create(candidate=candidate, term=search_term)
+
     @swagger_auto_schema(
         operation_description="Retrieve a list of jobs with optional filters and similarity scores "
                               "for the authenticated candidate.",
@@ -224,6 +275,10 @@ class CandidateJobsView(APIView):
         # Get the filter params from request
         filters = request.query_params
 
+        # Save the search term if provided
+        search_term = filters.get('search', '').strip()
+        self.save_search_term(candidate, search_term)
+
         # Apply filters for the Job model using the JobFilter
         job_filter = JobFilter(filters, queryset=Job.objects.all())
         jobs = job_filter.qs.order_by(
@@ -234,6 +289,19 @@ class CandidateJobsView(APIView):
         paginator = self.CustomPagination()
         paginated_jobs = paginator.paginate_queryset(jobs, request)
 
+        # Fetch ads and paginate them
+        ads_per_page = self.get_ads_per_page(len(paginated_jobs))  # Dynamically fetch ads per page
+        current_page = int(request.query_params.get('page', 1)) - 1
+        ads = list(Ad.objects.filter(is_active=True).order_by("-created_at"))
+
+        if ads:
+            ads_to_show = ads[current_page * ads_per_page:(current_page + 1) * ads_per_page]
+            # If ads are exhausted, start over
+            if not ads_to_show:
+                ads_to_show = ads[:ads_per_page]
+        else:
+            ads_to_show = []
+
         job_ids = [job.id for job in paginated_jobs]
         job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
         similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
@@ -243,11 +311,20 @@ class CandidateJobsView(APIView):
         favorite_jobs_ids = [favorite.job.id for favorite in favorites]
         favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
 
-        serializer = JobSerializer(paginated_jobs, many=True,
-                                   context={'similarity_scores_map': similarity_scores_map, 'applies_map': applies_map,
-                                            'favorites_map': favorites_map, 'request': request})
+        job_serializer = JobSerializer(
+            paginated_jobs, many=True,
+            context={
+                'similarity_scores_map': similarity_scores_map,
+                'applies_map': applies_map,
+                'favorites_map': favorites_map,
+                'request': request
+            }
+        )
+        ad_serializer = AdSerializer(ads_to_show, many=True, context={'request': request})
 
-        return paginator.get_paginated_response(serializer.data)
+        jobs_with_ads = self.distribute_ads(list(job_serializer.data), list(ad_serializer.data), ads_per_page)
+
+        return paginator.get_paginated_response(jobs_with_ads)
 
 
 class JobDetailView(APIView):
@@ -290,6 +367,40 @@ class CandidateFavoriteJobsView(APIView):
         page_size_query_param = 'page_size'
         max_page_size = 100
 
+    def get_ads_per_page(self, total_jobs):
+        """
+        Calculate the number of ads to show based on job count and configuration.
+        """
+        config = GeneralSetting.objects.get_configuration()
+        ads_per_page = config.ads_per_page  # Configured value
+
+        # Calculate ads by ratio (1 ad per 5 jobs)
+        ads_by_ratio = max(1, total_jobs // 5)
+
+        # Use the minimum between ratio-based ads and the configured max ads
+        return min(ads_by_ratio, ads_per_page)
+
+    def distribute_ads(self, jobs, ads, ads_per_page):
+        """
+        Distribute ads evenly among jobs with a reasonable distance.
+        """
+        if not ads or ads_per_page == 0:
+            return jobs
+
+        results = list(jobs)
+        ad_count = len(ads)
+        total_positions = len(results) + ad_count
+        step = max(1, total_positions // (ad_count + 1))
+
+        ad_index = 0
+        for i in range(step, total_positions, step):
+            if ad_index < ad_count:
+                index = min(i, len(results))  # Ensure we don’t go out of bounds
+                results.insert(index, ads[ad_index])
+                ad_index += 1
+
+        return results
+
     @swagger_auto_schema(
         operation_description="Get the list of favorite jobs for the authenticated candidate.",
         manual_parameters=[
@@ -310,6 +421,19 @@ class CandidateFavoriteJobsView(APIView):
         paginator = self.CustomPagination()
         paginated_results = paginator.paginate_queryset(jobs, request)
 
+        # Fetch ads and paginate them
+        ads_per_page = self.get_ads_per_page(len(paginated_results))  # Dynamically fetch ads per page
+        current_page = int(request.query_params.get('page', 1)) - 1
+        ads = list(Ad.objects.filter(is_active=True).order_by("-created_at"))
+
+        if ads:
+            ads_to_show = ads[current_page * ads_per_page:(current_page + 1) * ads_per_page]
+            # If ads are exhausted, start over
+            if not ads_to_show:
+                ads_to_show = ads[:ads_per_page]
+        else:
+            ads_to_show = []
+
         job_ids = [job.id for job in paginated_results]
 
         # Get all JobSearches for the candidate
@@ -322,14 +446,18 @@ class CandidateFavoriteJobsView(APIView):
         favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
 
         # Serialize jobs with similarity score
-        serializer = JobSerializer(
+        job_serializer = JobSerializer(
             paginated_results,
             many=True,
             context={'similarity_scores_map': similarity_scores_map, 'applies_map': applies_map,
                      "favorites_map": favorites_map, 'request': request}
         )
 
-        return paginator.get_paginated_response(serializer.data)
+        ad_serializer = AdSerializer(ads_to_show, many=True, context={'request': request})
+
+        jobs_with_ads = self.distribute_ads(list(job_serializer.data), list(ad_serializer.data), ads_per_page)
+
+        return paginator.get_paginated_response(jobs_with_ads)
 
     @swagger_auto_schema(
         operation_description="Add a job to the candidate's favorites.",
@@ -376,6 +504,40 @@ class CandidateAppliedJobsView(APIView):
         page_size_query_param = 'page_size'
         max_page_size = 100
 
+    def get_ads_per_page(self, total_jobs):
+        """
+        Calculate the number of ads to show based on job count and configuration.
+        """
+        config = GeneralSetting.objects.get_configuration()
+        ads_per_page = config.ads_per_page  # Configured value
+
+        # Calculate ads by ratio (1 ad per 5 jobs)
+        ads_by_ratio = max(1, total_jobs // 5)
+
+        # Use the minimum between ratio-based ads and the configured max ads
+        return min(ads_by_ratio, ads_per_page)
+
+    def distribute_ads(self, jobs, ads, ads_per_page):
+        """
+        Distribute ads evenly among jobs with a reasonable distance.
+        """
+        if not ads or ads_per_page == 0:
+            return jobs
+
+        results = list(jobs)
+        ad_count = len(ads)
+        total_positions = len(results) + ad_count
+        step = max(1, total_positions // (ad_count + 1))
+
+        ad_index = 0
+        for i in range(step, total_positions, step):
+            if ad_index < ad_count:
+                index = min(i, len(results))  # Ensure we don’t go out of bounds
+                results.insert(index, ads[ad_index])
+                ad_index += 1
+
+        return results
+
     @swagger_auto_schema(
         operation_description="Get the list of applied jobs for the authenticated candidate.",
         manual_parameters=[
@@ -396,6 +558,19 @@ class CandidateAppliedJobsView(APIView):
         paginator = self.CustomPagination()
         paginated_results = paginator.paginate_queryset(applied_jobs, request)
 
+        # Fetch ads and paginate them
+        ads_per_page = self.get_ads_per_page(len(paginated_results))  # Dynamically fetch ads per page
+        current_page = int(request.query_params.get('page', 1)) - 1
+        ads = list(Ad.objects.filter(is_active=True).order_by("-created_at"))
+
+        if ads:
+            ads_to_show = ads[current_page * ads_per_page:(current_page + 1) * ads_per_page]
+            # If ads are exhausted, start over
+            if not ads_to_show:
+                ads_to_show = ads[:ads_per_page]
+        else:
+            ads_to_show = []
+
         job_ids = [job.id for job in paginated_results]
 
         # Get similarity scores for the candidate
@@ -408,14 +583,19 @@ class CandidateAppliedJobsView(APIView):
         favorites_map = {job_id: True if job_id in favorite_jobs_ids else False for job_id in job_ids}
 
         # Serialize jobs with similarity score
-        serializer = JobSerializer(
+        job_serializer = JobSerializer(
             paginated_results,
             many=True,
             context={'similarity_scores_map': similarity_scores_map, 'applies_map': applies_map,
                      "favorites_map": favorites_map, 'request': request}
         )
 
-        return paginator.get_paginated_response(serializer.data)
+        ad_serializer = AdSerializer(ads_to_show, many=True, context={'request': request})
+
+        jobs_with_ads = self.distribute_ads(list(job_serializer.data), list(ad_serializer.data), ads_per_page)
+
+        return paginator.get_paginated_response(jobs_with_ads)
+
 
     @swagger_auto_schema(
         operation_description="Toggle the applied status for a specific job for the authenticated candidate. The candidate must have a similarity score for the job.",
@@ -2318,12 +2498,13 @@ class CVFilter(django_filters.FilterSet):
     email = django_filters.CharFilter(field_name="cv_data__email", lookup_expr="icontains")
     city = django_filters.CharFilter(field_name="cv_data__city", lookup_expr="icontains")
     skills = django_filters.CharFilter(method="filter_by_skills")
+    search = django_filters.CharFilter(method='filter_search')
 
     class Meta:
         model = CV
         fields = [
             "job_title", "job_location", "created_at_after", "created_at_before",
-            "name", "email", "city", "skills"
+            "name", "email", "city", "skills", "search"
         ]
 
     def filter_by_skills(self, queryset, name, value):
@@ -2331,6 +2512,21 @@ class CVFilter(django_filters.FilterSet):
         for skill in skills:
             queryset = queryset.filter(Q(cv_data__skills__icontains=skill))
         return queryset
+
+    def filter_search(self, queryset, name, value):
+        """
+        Perform a global search across relevant fields in CV and CVData.
+        """
+        value = value.strip().lower()
+        return queryset.filter(
+            Q(job__title__icontains=value) |
+            Q(job__location__icontains=value) |
+            Q(cv_data__name__icontains=value) |
+            Q(cv_data__email__icontains=value) |
+            Q(cv_data__city__icontains=value) |
+            Q(cv_data__skills__icontains=value) |
+            Q(cv_data__summary__icontains=value)
+        )
 
 
 class CandidateTailoredCVsPagination(PageNumberPagination):
@@ -2362,6 +2558,8 @@ class CandidateCVsView(ListAPIView):
             openapi.Parameter('email', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by email'),
             openapi.Parameter('city', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by city'),
             openapi.Parameter('skills', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by skills (comma-separated)'),
+            openapi.Parameter('search', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                             description='Search across title, location, name, email, skills and summary.'),
             openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page number'),
             openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Number of items per page'),
         ],
@@ -3110,3 +3308,46 @@ class DownloadCVPDFView(APIView):
 
         except CV.DoesNotExist:
             return Response({"error": "CV not found"}, status=404)
+
+
+class RecentSearchTermsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve the most recent search terms for the authenticated user.",
+        responses={
+            200: openapi.Response(
+                description="A list of recent search terms.",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "search_terms": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(
+                                type=openapi.TYPE_OBJECT,
+                                properties={
+                                    "term": openapi.Schema(type=openapi.TYPE_STRING, description="Search term"),
+                                    "last_searched_at": openapi.Schema(
+                                        type=openapi.TYPE_STRING, format="date-time", description="Last searched date"
+                                    ),
+                                },
+                            ),
+                        )
+                    },
+                ),
+            )
+        },
+        security=[{'Bearer': []}]
+    )
+    def get(self, request):
+        candidate = request.user.candidate
+
+        # Fetch the number of terms to return from the configuration
+        config = GeneralSetting.objects.get_configuration()
+        max_terms = config.max_recent_search_terms  # Example field in your configuration model
+
+        # Get active search terms sorted by most recent
+        terms = SearchTerm.objects.filter(candidate=candidate, is_active=True).order_by('-last_searched_at')[:max_terms]
+
+        # Serialize and return the terms
+        return Response({'search_terms': [{'term': term.term, 'last_searched_at': term.last_searched_at} for term in terms]})

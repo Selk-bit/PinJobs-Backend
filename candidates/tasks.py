@@ -1,6 +1,6 @@
 from celery import shared_task
 from django.utils import timezone
-from .models import Candidate, CV, CVData, ScrapingSettings, KeywordLocationCombination
+from .models import Candidate, CV, CVData, ScrapingSetting, KeywordLocationCombination
 from .utils import scrape_jobs
 from datetime import timedelta
 from django.forms.models import model_to_dict
@@ -61,7 +61,7 @@ def get_cv_data(candidate):
 @shared_task
 def run_scraping_task():
 
-    settings = ScrapingSettings.objects.first()
+    settings = ScrapingSetting.objects.first()
     if settings.is_scraping:
         print("Scraping task already running. Exiting.")
         return
