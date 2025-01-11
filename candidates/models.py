@@ -10,17 +10,9 @@ class Candidate(models.Model):
     phone = models.CharField(max_length=100, blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
-    country = models.CharField(max_length=100, blank=True, null=True)  # New field for country
+    country = models.CharField(max_length=100, blank=True, null=True)  # Country field
     credits = models.IntegerField(default=0)
-    # num_jobs_to_scrape = models.IntegerField(default=10)
-    # scrape_interval = models.IntegerField(default=1)
-    # scrape_unit = models.CharField(
-    #     max_length=10,
-    #     choices=[('hours', 'Hours'), ('days', 'Days'), ('weeks', 'Weeks')],
-    #     default='hours'
-    # )
-    # last_scrape_time = models.DateTimeField(blank=True, null=True)
-    # is_scraping = models.BooleanField(default=False)
+    profile_picture = models.ImageField(upload_to="profile_pictures/", blank=True, null=True)  # New field
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -226,6 +218,19 @@ class Job(models.Model):
         return f"{self.title} at {self.company_name}"
 
 
+class Ad(models.Model):
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    original_url = models.URLField(max_length=5000)
+    background = models.ImageField(upload_to="ads/backgrounds/", blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Ad: {self.title}"
+
+
 class JobSearch(models.Model):
     candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE)
     job = models.ForeignKey(Job, on_delete=models.CASCADE)
@@ -315,7 +320,24 @@ class KeywordLocationCombination(models.Model):
         return f"{self.keyword.keyword} + {self.location.location}"
 
 
-class ScrapingSettings(models.Model):
+class GeneralSettingManager(models.Manager):
+    def get_configuration(self):
+        config, created = self.get_or_create(id=1)
+        return config
+
+
+class GeneralSetting(models.Model):
+    ads_per_page = models.PositiveIntegerField(default=2, help_text="Number of ads to display per page.")
+    max_recent_search_terms = models.PositiveIntegerField(default=10, help_text="Number of search suggestions to display.")
+    last_updated = models.DateTimeField(auto_now=True)
+
+    objects = GeneralSettingManager()
+
+    def __str__(self):
+        return "General Settings"
+
+
+class ScrapingSetting(models.Model):
     num_jobs_to_scrape = models.IntegerField(default=100)
     is_scraping = models.BooleanField(default=False)
 
@@ -323,14 +345,14 @@ class ScrapingSettings(models.Model):
         return f"Scraping Settings: {self.num_jobs_to_scrape} jobs"
 
     def save(self, *args, **kwargs):
-        if not self.pk and ScrapingSettings.objects.exists():
+        if not self.pk and ScrapingSetting.objects.exists():
             # This below line will render error by breaking page, you will see
             raise ValidationError(
                 "There can be only one instance of settings, you can not add another"
             )
             return None
 
-        return super(ScrapingSettings, self).save(*args, **kwargs)
+        return super(ScrapingSetting, self).save(*args, **kwargs)
 
 
 class Pack(models.Model):
@@ -373,3 +395,11 @@ class Favorite(models.Model):
         unique_together = ('candidate', 'job')  # Ensure no duplicate favorites
 
 
+class SearchTerm(models.Model):
+    candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE, related_name='search_terms')
+    term = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    last_searched_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.term} (Active: {self.is_active})"

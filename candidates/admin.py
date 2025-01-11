@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Keyword, Location,
-                     ScrapingSettings, Pack, Price, CreditAction, KeywordLocationCombination, Favorite, AbstractTemplate)
+                     ScrapingSetting, Pack, Price, CreditAction, KeywordLocationCombination, Favorite, AbstractTemplate,
+                     Ad, GeneralSetting, SearchTerm)
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
 from import_export import resources, fields
@@ -214,6 +215,12 @@ class JobAdmin(ImportExportModelAdmin):
         return True
 
 
+@admin.register(Ad)
+class AdAdmin(admin.ModelAdmin):
+    list_display = ('title', 'description', 'original_url', 'is_active')
+    search_fields = ('title', 'description', 'original_url')
+
+
 @admin.register(JobSearch)
 class JobSearchAdmin(admin.ModelAdmin):
     list_display = ('job', 'candidate', 'similarity_score', 'search_date')
@@ -240,8 +247,16 @@ class LocationAdmin(admin.ModelAdmin):
     search_fields = ['location__location']
 
 
-@admin.register(ScrapingSettings)
-class ScrapingSettingsAdmin(admin.ModelAdmin):
+@admin.register(GeneralSetting)
+class GeneralSettingAdmin(admin.ModelAdmin):
+    list_display = ['ads_per_page', 'max_recent_search_terms', 'last_updated']
+    list_editable = ['ads_per_page', 'max_recent_search_terms']
+    list_display_links = None
+    help_texts = {"ads_per_page": "Set the number of ads displayed on each page."}
+
+
+@admin.register(ScrapingSetting)
+class ScrapingSettingAdmin(admin.ModelAdmin):
     list_display = ('num_jobs_to_scrape', 'is_scraping')
 
 
@@ -274,3 +289,7 @@ class KeywordLocationCombinationAdmin(admin.ModelAdmin):
 class FavoriteAdmin(admin.ModelAdmin):
     list_display = ['candidate', 'job', 'created_at']
 
+
+@admin.register(SearchTerm)
+class SearchTermAdmin(admin.ModelAdmin):
+    list_display = ['candidate', 'term', 'is_active', 'last_searched_at']

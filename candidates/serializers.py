@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
-                     Price, Pack, AbstractTemplate, Favorite)
+                     Price, Pack, AbstractTemplate, Favorite, Ad)
 from django.contrib.auth.models import User
 from rest_framework.response import Response
 
@@ -16,7 +16,7 @@ class CandidateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'user']
+        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'profile_picture', 'user']
 
 
 class TemplateSerializer(serializers.ModelSerializer):
@@ -111,10 +111,11 @@ class JobSerializer(serializers.ModelSerializer):
     is_favorite = serializers.SerializerMethodField()
     is_applied = serializers.SerializerMethodField()
     click_count = serializers.SerializerMethodField()
+    is_ad = serializers.SerializerMethodField()
 
     class Meta:
         model = Job
-        fields = ["id", "title", "description", "requirements", "company_name", "company_logo", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite", "is_applied", "click_count"]
+        fields = ["id", "title", "description", "requirements", "company_name", "company_logo", "company_size", "location", "linkedin_profiles", "employment_type", "original_url", "min_salary", "max_salary", "benefits", "skills_required", "posted_date", "industry", "job_type", "similarity_score", "is_favorite", "is_applied", "click_count", "is_ad"]
 
     def get_similarity_score(self, obj):
         similarity_scores_map = self.context.get('similarity_scores_map', {})
@@ -130,6 +131,20 @@ class JobSerializer(serializers.ModelSerializer):
 
     def get_click_count(self, obj):
         return obj.clicked_by.count()
+
+    def get_is_ad(self, obj):
+        return False
+
+class AdSerializer(serializers.ModelSerializer):
+    is_ad = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Ad
+        fields = ["id", "title", "description", "original_url", "background", "is_ad"]
+
+    def get_is_ad(self, obj):
+        return True
+
 
 class CVSerializer(serializers.ModelSerializer):
     job = JobSerializer()
