@@ -823,7 +823,6 @@ class UserProfileView(APIView):
                 "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Age."),
                 "city": openapi.Schema(type=openapi.TYPE_STRING, description="City."),
                 "country": openapi.Schema(type=openapi.TYPE_STRING, description="Country."),
-                "credits": openapi.Schema(type=openapi.TYPE_INTEGER, description="Credits."),
                 "profile_picture": openapi.Schema(
                     type=openapi.TYPE_FILE,
                     description="Profile picture (image file)."
@@ -860,7 +859,7 @@ class UserProfileView(APIView):
                     description="Profile picture (image file)."
                 ),
             },
-            required=[]  # No required fields for PATCH
+            required=[]
         ),
         responses={200: CandidateSerializer(), 400: openapi.Response(description="Bad Request")},
         consumes=["multipart/form-data"],
