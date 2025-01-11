@@ -813,9 +813,26 @@ class UserProfileView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
-        operation_description="Update the authenticated user's profile.",
-        request_body=CandidateSerializer,
-        responses={200: CandidateSerializer(), 400: openapi.Response(description='Bad Request')}
+        operation_description="Update the authenticated user's profile with all fields (PUT).",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="First name of the candidate."),
+                "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Last name of the candidate."),
+                "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number."),
+                "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Age."),
+                "city": openapi.Schema(type=openapi.TYPE_STRING, description="City."),
+                "country": openapi.Schema(type=openapi.TYPE_STRING, description="Country."),
+                "credits": openapi.Schema(type=openapi.TYPE_INTEGER, description="Credits."),
+                "profile_picture": openapi.Schema(
+                    type=openapi.TYPE_FILE,
+                    description="Profile picture (image file)."
+                ),
+            },
+            required=["first_name", "last_name"]
+        ),
+        responses={200: CandidateSerializer(), 400: openapi.Response(description="Bad Request")},
+        consumes=["multipart/form-data"],
     )
     def put(self, request):
         # Update current user profile
@@ -828,9 +845,25 @@ class UserProfileView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @swagger_auto_schema(
-        operation_description="Partially update the authenticated user's profile.",
-        request_body=CandidateSerializer,
-        responses={200: CandidateSerializer(), 400: openapi.Response(description='Bad Request')}
+        operation_description="Partially update the authenticated user's profile (PATCH).",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "first_name": openapi.Schema(type=openapi.TYPE_STRING, description="First name of the candidate."),
+                "last_name": openapi.Schema(type=openapi.TYPE_STRING, description="Last name of the candidate."),
+                "phone": openapi.Schema(type=openapi.TYPE_STRING, description="Phone number."),
+                "age": openapi.Schema(type=openapi.TYPE_INTEGER, description="Age."),
+                "city": openapi.Schema(type=openapi.TYPE_STRING, description="City."),
+                "country": openapi.Schema(type=openapi.TYPE_STRING, description="Country."),
+                "profile_picture": openapi.Schema(
+                    type=openapi.TYPE_FILE,
+                    description="Profile picture (image file)."
+                ),
+            },
+            required=[]  # No required fields for PATCH
+        ),
+        responses={200: CandidateSerializer(), 400: openapi.Response(description="Bad Request")},
+        consumes=["multipart/form-data"],
     )
     def patch(self, request):
         # Partially update current user profile
