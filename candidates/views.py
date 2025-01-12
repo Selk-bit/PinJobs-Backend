@@ -2610,6 +2610,13 @@ class CandidateCVsView(ListAPIView):
         # Apply filters to the remaining CVs (excluding the base CV)
         queryset = self.filter_queryset(self.get_queryset().exclude(id=base_cv.id if base_cv else None))
 
+        # Extract job IDs for tailored CVs
+        job_ids = list(queryset.exclude(job__isnull=True).values_list("job__id", flat=True))
+
+        # Get similarity scores for related jobs
+        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
+        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+
         # Combine base CV with the filtered queryset
         if base_cv:
             queryset = [base_cv] + list(queryset)
@@ -2617,10 +2624,10 @@ class CandidateCVsView(ListAPIView):
         # Paginate the combined queryset
         page = self.paginate_queryset(queryset)
         if page is not None:
-            serializer = CVSerializer(page, many=True, context={'request': request})
+            serializer = CVSerializer(page, many=True, context={'request': request, 'similarity_scores_map': similarity_scores_map})
             return self.get_paginated_response(serializer.data)
 
-        serializer = CVSerializer(queryset, many=True, context={'request': request})
+        serializer = CVSerializer(queryset, many=True, context={'request': request, 'similarity_scores_map': similarity_scores_map})
         return Response(serializer.data)
 
 
