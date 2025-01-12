@@ -1293,6 +1293,7 @@ def generate_cv_pdf(cv):
         driver = webdriver.Chrome(options=chrome_options)
         driver.get(url)
         driver.execute_script("window.location.reload(true);")
+        driver.execute_script("window.location.reload(true);")
 
         # Wait for the container to appear
         try:
