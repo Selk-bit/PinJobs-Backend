@@ -239,7 +239,7 @@ class CandidateJobsView(APIView):
         existing_term = SearchTerm.objects.filter(candidate=candidate, term__iexact=search_term).first()
         if existing_term:
             # Update the `last_searched_at` field
-            existing_term.last_searched_at = now()
+            existing_term.last_searched_at = datetime.now()
             existing_term.save()
         else:
             # Create a new search term
