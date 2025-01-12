@@ -3230,13 +3230,11 @@ class CVDetailView(APIView):
         """
         try:
             cv_data_instance = CVData.objects.get(cv=cv)
+            # Use update for fields directly
+            CVData.objects.filter(cv=cv).update(**cv_data)
         except CVData.DoesNotExist:
-            cv_data_instance = CVData(cv=cv)
-
-        serializer = CVDataSerializer(cv_data_instance, data=cv_data, partial=partial)
-        if not serializer.is_valid():
-            raise serializers.ValidationError(serializer.errors)
-        serializer.save()
+            # Create a new instance normally
+            cv_data_instance = CVData.objects.create(cv=cv, **cv_data)
 
     def update_template(self, cv, template_data, partial):
         """
