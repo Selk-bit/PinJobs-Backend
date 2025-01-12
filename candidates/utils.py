@@ -1283,6 +1283,7 @@ def generate_cv_pdf(cv):
 
     # URL for the frontend resume preview
     url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
+    print(url)
     chrome_options = get_options()
     driver = None
 
@@ -1332,7 +1333,7 @@ def generate_cv_pdf(cv):
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
-
+        print(cv.thumbnail)
         # Save the CV instance after all updates
         cv.save()
 
