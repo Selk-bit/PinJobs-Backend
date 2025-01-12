@@ -377,6 +377,7 @@ def kill_chrome_processes():
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
 
+
 def clear_recent_temp_files(temp_dir, age_minutes=2):
     current_time = time.time()
     age_seconds = age_minutes * 60
@@ -1291,6 +1292,7 @@ def generate_cv_pdf(cv):
         chromedriver_autoinstaller.install()
         driver = webdriver.Chrome(options=chrome_options)
         driver.get(url)
+        driver.execute_script("window.location.reload(true);")
 
         # Wait for the container to appear
         try:
