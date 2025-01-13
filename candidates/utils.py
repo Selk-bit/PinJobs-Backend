@@ -40,6 +40,7 @@ import tempfile
 from django.core.files.base import ContentFile
 from io import BytesIO
 from pdf2image import convert_from_bytes
+import string
 
 
 ua = UserAgent()
@@ -1281,7 +1282,7 @@ def generate_cv_pdf(cv):
     """
     if not cv.cv_data or not cv.template:
         raise ValueError("CV must have both data and template to generate PDF")
-    time.sleep(10)
+
     # URL for the frontend resume preview
     url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
     print(url)
@@ -1325,14 +1326,17 @@ def generate_cv_pdf(cv):
             if os.path.exists(old_thumbnail_path):
                 os.remove(old_thumbnail_path)
 
+        characters = string.ascii_letters + string.digits
+        random_string = "".join(random.choice(characters) for _ in range(5))
+
         # Save the new PDF to Django's storage
-        pdf_filename = f"cv_{cv.id}.pdf"
+        pdf_filename = f"cv_{cv.id}_{random_string}.pdf"
         pdf_path = pdf_filename
         cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=False)
 
         # Generate thumbnail directly from the PDF data (using `convert_from_bytes`)
         images = convert_from_bytes(pdf_data, first_page=1, last_page=1)
-        thumbnail_filename = f"thumbnail_{cv.id}.png"
+        thumbnail_filename = f"thumbnail_{cv.id}_{random_string}.png"
         thumbnail_path = thumbnail_filename
 
         # Save the thumbnail to Django's storage
