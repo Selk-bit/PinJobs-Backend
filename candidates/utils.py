@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import psutil
 import shutil
 from .constants import *
-from .models import Job, JobSearch, CVData, CreditAction, CV
+from .models import Job, JobSearch, CVData, CreditAction
 from django.core.files.storage import default_storage
 from paypalcheckoutsdk.core import PayPalHttpClient, SandboxEnvironment
 from bs4 import BeautifulSoup
@@ -1333,13 +1333,13 @@ def generate_cv_pdf(cv):
         cv.thumbnail.delete(save=False)  # Remove any in-memory reference
 
         # Save the new PDF to Django's storage
-        pdf_filename = f"cv_{cv.id}_{random_string}.pdf"
+        pdf_filename = f"cv_{cv.id}.pdf"
         pdf_path = pdf_filename
         cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=False)
 
         # Generate thumbnail directly from the PDF data (using `convert_from_bytes`)
         images = convert_from_bytes(pdf_data, first_page=1, last_page=1)
-        thumbnail_filename = f"thumbnail_{cv.id}_{random_string}.png"
+        thumbnail_filename = f"thumbnail_{cv.id}.png"
         thumbnail_path = thumbnail_filename
 
         if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
@@ -1352,11 +1352,13 @@ def generate_cv_pdf(cv):
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
+        cv.generated_pdf.name = pdf_filename
+        cv.thumbnail.name = thumbnail_filename
+        print(cv.generated_pdf.name)
+        print(cv.thumbnail.name)
 
-        CV.objects.filter(id=cv.id).update(
-            generated_pdf=pdf_filename,
-            thumbnail=thumbnail_filename
-        )
+        # Save the CV instance after all updates
+        cv.save()
 
     finally:
         if driver:
