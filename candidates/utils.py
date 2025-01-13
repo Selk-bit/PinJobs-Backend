@@ -1281,7 +1281,7 @@ def generate_cv_pdf(cv):
     """
     if not cv.cv_data or not cv.template:
         raise ValueError("CV must have both data and template to generate PDF")
-
+    time.sleep(1)
     # URL for the frontend resume preview
     url = f"{FRONTEND_PREVIEW_URL}{cv.id}"
     print(url)
