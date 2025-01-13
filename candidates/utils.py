@@ -1344,9 +1344,11 @@ def generate_cv_pdf(cv):
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
         print(cv.thumbnail)
+        print(cv.generated_pdf)
         # Save the CV instance after all updates
         cv.save()
 
     finally:
         if driver:
             driver.quit()
+            cv.save()
