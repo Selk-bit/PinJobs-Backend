@@ -1346,9 +1346,8 @@ def generate_cv_pdf(cv):
         print(cv.thumbnail)
         print(cv.generated_pdf)
         # Save the CV instance after all updates
-        cv.save()
+        cv.save(update_fields=["generated_pdf", "thumbnail"])
 
     finally:
         if driver:
             driver.quit()
-            cv.save()
