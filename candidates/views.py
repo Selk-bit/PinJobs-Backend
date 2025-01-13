@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 import requests
 from django.core.files.storage import default_storage
+from django.db.models.signals import post_save
 from django.conf import settings
 import os
 from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
@@ -3116,7 +3117,7 @@ class CVDetailView(APIView):
         cv.save(update_fields=["name"])
 
         # Update CVData
-        self.update_cv_data(cv, request.data["cv_data"], partial=False)
+        self.update_cv_data(cv, request.data["cv_data"], partial=True, fire_signal=False)
 
         # Update Template
         self.update_template(cv, request.data["template"], partial=False)
@@ -3223,7 +3224,7 @@ class CVDetailView(APIView):
 
         # Update CVData if present
         if "cv_data" in request.data:
-            self.update_cv_data(cv, request.data["cv_data"], partial=True)
+            self.update_cv_data(cv, request.data["cv_data"], partial=True, fire_signal=True)
 
         # Update Template if present
         if "template" in request.data:
@@ -3231,16 +3232,20 @@ class CVDetailView(APIView):
 
         return Response(CVSerializer(cv, context={"request": request}).data, status=status.HTTP_200_OK)
 
-    def update_cv_data(self, cv, cv_data, partial):
+    def update_cv_data(self, cv, cv_data, partial, fire_signal=True):
         """
-        Helper to update or create CVData.
+        Helper to update or create CVData with an option to suppress the signal.
         """
         try:
             cv_data_instance = CVData.objects.get(cv=cv)
-            # Use update for fields directly
+            # Update fields directly
             CVData.objects.filter(cv=cv).update(**cv_data)
+
+            # Optionally, manually trigger the signal if fire_signal is True
+            if fire_signal:
+                post_save.send(sender=CVData, instance=cv_data_instance, created=False)
         except CVData.DoesNotExist:
-            # Create a new instance normally
+            # Create a new instance normally, which will automatically trigger the signal
             cv_data_instance = CVData.objects.create(cv=cv, **cv_data)
 
     def update_template(self, cv, template_data, partial):

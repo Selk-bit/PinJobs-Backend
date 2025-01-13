@@ -1339,6 +1339,12 @@ def generate_cv_pdf(cv):
         thumbnail_filename = f"thumbnail_{cv.id}_{random_string}.png"
         thumbnail_path = thumbnail_filename
 
+        if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
+            default_storage.delete(cv.generated_pdf.name)
+
+        if cv.thumbnail and default_storage.exists(cv.thumbnail.name):
+            default_storage.delete(cv.thumbnail.name)
+
         # Save the thumbnail to Django's storage
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
