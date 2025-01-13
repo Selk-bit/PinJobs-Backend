@@ -1352,11 +1352,8 @@ def generate_cv_pdf(cv):
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
-        cv.generated_pdf = ContentFile(pdf_data, name=pdf_filename)
-        cv.thumbnail = ContentFile(thumbnail_io.getvalue(), name=thumbnail_filename)
-        print(cv.generated_pdf)
-        print(cv.thumbnail)
-
+        cv.generated_pdf.name = pdf_filename
+        cv.thumbnail.name = thumbnail_filename
         # Save the CV instance after all updates
         cv.save()
 
