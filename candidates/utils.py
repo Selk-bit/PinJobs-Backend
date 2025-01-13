@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import psutil
 import shutil
 from .constants import *
-from .models import Job, JobSearch, CVData, CreditAction
+from .models import Job, JobSearch, CVData, CreditAction, CV
 from django.core.files.storage import default_storage
 from paypalcheckoutsdk.core import PayPalHttpClient, SandboxEnvironment
 from bs4 import BeautifulSoup
@@ -1352,14 +1352,11 @@ def generate_cv_pdf(cv):
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
-        print(cv.thumbnail)
-        print(cv.generated_pdf)
-        cv.generated_pdf.name = pdf_filename
-        cv.thumbnail.name = thumbnail_filename
-        cv._meta.get_field("generated_pdf").pre_save(cv, add=False)
-        cv._meta.get_field("thumbnail").pre_save(cv, add=False)
-        # Save the CV instance after all updates
-        cv.save()
+
+        CV.objects.filter(id=cv.id).update(
+            generated_pdf=pdf_filename,
+            thumbnail=thumbnail_filename
+        )
 
     finally:
         if driver:
