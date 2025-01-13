@@ -1332,7 +1332,7 @@ def generate_cv_pdf(cv):
         # Save the new PDF to Django's storage
         pdf_filename = f"cv_{cv.id}_{random_string}.pdf"
         pdf_path = pdf_filename
-        cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=False)
+        cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=True)
 
         # Generate thumbnail directly from the PDF data (using `convert_from_bytes`)
         images = convert_from_bytes(pdf_data, first_page=1, last_page=1)
@@ -1348,7 +1348,7 @@ def generate_cv_pdf(cv):
         # Save the thumbnail to Django's storage
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
-        cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
+        cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=True)
         print(cv.thumbnail)
         print(cv.generated_pdf)
         # Save the CV instance after all updates
