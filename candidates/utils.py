@@ -1316,23 +1316,23 @@ def generate_cv_pdf(cv):
         pdf_data = base64.b64decode(response['data'])
 
         # Remove previous files if they exist
-        if cv.generated_pdf:
-            print(cv.generated_pdf)
-            old_pdf_path = os.path.join(settings.MEDIA_ROOT, cv.generated_pdf.name)
-            if os.path.exists(old_pdf_path):
-                os.remove(old_pdf_path)
-
-        if cv.thumbnail:
-            print(cv.thumbnail)
-            old_thumbnail_path = os.path.join(settings.MEDIA_ROOT, cv.thumbnail.name)
-            if os.path.exists(old_thumbnail_path):
-                os.remove(old_thumbnail_path)
+        # if cv.generated_pdf:
+        #     print(cv.generated_pdf)
+        #     old_pdf_path = os.path.join(settings.MEDIA_ROOT, cv.generated_pdf.name)
+        #     if os.path.exists(old_pdf_path):
+        #         os.remove(old_pdf_path)
+        #
+        # if cv.thumbnail:
+        #     print(cv.thumbnail)
+        #     old_thumbnail_path = os.path.join(settings.MEDIA_ROOT, cv.thumbnail.name)
+        #     if os.path.exists(old_thumbnail_path):
+        #         os.remove(old_thumbnail_path)
 
         characters = string.ascii_letters + string.digits
         random_string = "".join(random.choice(characters) for _ in range(5))
 
-        cv.generated_pdf.delete(save=False)  # Remove any in-memory reference
-        cv.thumbnail.delete(save=False)  # Remove any in-memory reference
+        # cv.generated_pdf.delete(save=False)  # Remove any in-memory reference
+        # cv.thumbnail.delete(save=False)  # Remove any in-memory reference
 
         # Save the new PDF to Django's storage
         pdf_filename = f"Cvs/pdf/cv_{cv.id}_{random_string}.pdf"
@@ -1344,11 +1344,11 @@ def generate_cv_pdf(cv):
         thumbnail_filename = f"Cvs/thumbnails/thumbnail_{cv.id}_{random_string}.png"
         thumbnail_path = thumbnail_filename
 
-        if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
-            default_storage.delete(cv.generated_pdf.name)
-
-        if cv.thumbnail and default_storage.exists(cv.thumbnail.name):
-            default_storage.delete(cv.thumbnail.name)
+        # if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
+        #     default_storage.delete(cv.generated_pdf.name)
+        #
+        # if cv.thumbnail and default_storage.exists(cv.thumbnail.name):
+        #     default_storage.delete(cv.thumbnail.name)
 
         # Save the thumbnail to Django's storage
         thumbnail_io = BytesIO()
