@@ -1335,13 +1335,13 @@ def generate_cv_pdf(cv):
         # cv.thumbnail.delete(save=False)  # Remove any in-memory reference
 
         # Save the new PDF to Django's storage
-        pdf_filename = f"Cvs/pdf/cv_{cv.id}_{random_string}.pdf"
+        pdf_filename = f"cv_{cv.id}_{random_string}.pdf"
         pdf_path = pdf_filename
         cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=False)
 
         # Generate thumbnail directly from the PDF data (using `convert_from_bytes`)
         images = convert_from_bytes(pdf_data, first_page=1, last_page=1)
-        thumbnail_filename = f"Cvs/thumbnails/thumbnail_{cv.id}_{random_string}.png"
+        thumbnail_filename = f"thumbnail_{cv.id}_{random_string}.png"
         thumbnail_path = thumbnail_filename
 
         # if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
