@@ -26,7 +26,7 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import update_session_auth_hash
 import django_filters
-from django.db.models import Q, F
+from django.db.models import F, Subquery, OuterRef, Q
 from rest_framework.pagination import PageNumberPagination
 from datetime import datetime
 from .utils import (paypal_client, is_valid_job_url, fetch_job_description, construct_tailored_job_prompt,
@@ -268,6 +268,7 @@ class CandidateJobsView(APIView):
         operation_description="Retrieve a list of jobs with optional filters and similarity scores "
                               "for the authenticated candidate.",
         manual_parameters=[
+            openapi.Parameter('sort_by', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Sort jobs by similarity_score or posted_date (default: posted_date).'),
             openapi.Parameter('description', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job description (contains).'),
             openapi.Parameter('company_name', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by company name (contains).'),
             openapi.Parameter('requirements', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by job requirements (contains).'),
@@ -300,10 +301,21 @@ class CandidateJobsView(APIView):
 
         # Apply filters for the Job model using the JobFilter
         job_filter = JobFilter(filters, queryset=Job.objects.all())
-        jobs = job_filter.qs.order_by(
-            F('posted_date').desc(nulls_last=True),  # Latest posted_date first, nulls pushed to bottom
-            '-created_at'  # Secondary sorting by creation date in descending order
-        )
+        jobs = job_filter.qs
+
+        # Determine sorting criteria
+        sort_by = filters.get('sort_by', 'posted_date').lower()
+        if sort_by == 'similarity_score':
+            jobs = jobs.annotate(
+                similarity_score=Subquery(
+                    JobSearch.objects.filter(
+                        candidate=candidate,
+                        job_id=OuterRef('id')
+                    ).values('similarity_score')[:1]
+                )
+            ).order_by('-similarity_score', '-posted_date')
+        else:
+            jobs = jobs.order_by(F('posted_date').desc(nulls_last=True), '-created_at')
 
         paginator = self.CustomPagination()
         paginated_jobs = paginator.paginate_queryset(jobs, request)
