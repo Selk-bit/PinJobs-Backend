@@ -129,15 +129,15 @@ def handle_cv_update(sender, instance, **kwargs):
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
-        UserProfile.objects.create(user=instance)
+        profile = UserProfile.objects.create(user=instance)
+
+        # Set is_verified to True for Google-created users
+        if not instance.has_usable_password():
+            profile.is_verified = True
+            profile.save()
 
 
 @receiver(post_save, sender=User)
 def create_candidate(sender, instance, created, **kwargs):
     if created:
         Candidate.objects.get_or_create(user=instance)
-
-        # Set is_verified to True for Google-created users
-        if not instance.has_usable_password():
-            instance.profile.is_verified = True
-            instance.profile.save()
