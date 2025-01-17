@@ -59,7 +59,8 @@ INSTALLED_APPS = [
     'allauth.account',
     'allauth.socialaccount',
     'allauth.socialaccount.providers.google',
-    'rest_framework.authtoken'
+    'rest_framework.authtoken',
+    'storages'
 ]
 
 AUTHENTICATION_BACKENDS = (
@@ -288,7 +289,12 @@ STORAGES = {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
     }
 }
-
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+AWS_S3_FILE_OVERWRITE = False
+AWS_QUERYSTRING_AUTH = False
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400',
+}
 
 AWS_ACCESS_KEY_ID = '002dee4590e8bfb0000000007'
 AWS_SECRET_ACCESS_KEY = 'K002I2vDUe2cWFBNUWka949z5utXCak'

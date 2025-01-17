@@ -313,7 +313,7 @@ class CandidateJobsView(APIView):
                         job_id=OuterRef('id')
                     ).values('similarity_score')[:1]
                 )
-            ).order_by('-similarity_score', '-posted_date')
+            ).order_by(F('similarity_score').desc(nulls_last=True), F('posted_date').desc(nulls_last=True))
         else:
             jobs = jobs.order_by(F('posted_date').desc(nulls_last=True), '-created_at')
 
