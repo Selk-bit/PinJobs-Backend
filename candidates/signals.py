@@ -1,6 +1,8 @@
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from .models import Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate, CVData
+from .models import (Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate, CVData, UserProfile,
+                     Candidate)
+from django.contrib.auth.models import User
 from .constants import DEFAULT_TEMPLATE_DATA
 from .utils import generate_cv_pdf
 
@@ -122,3 +124,20 @@ def handle_cv_update(sender, instance, **kwargs):
     # Generate PDF if both cv_data and template exist
     if cv and cv.cv_data and cv.cv_data.name and cv.template:
         generate_cv_pdf(cv)
+
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+
+@receiver(post_save, sender=User)
+def create_candidate(sender, instance, created, **kwargs):
+    if created:
+        Candidate.objects.get_or_create(user=instance)
+
+        # Set is_verified to True for Google-created users
+        if not instance.has_usable_password():
+            instance.profile.is_verified = True
+            instance.profile.save()

@@ -13,7 +13,6 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 import requests
-from django.core.files.storage import default_storage
 from django.db.models.signals import post_save
 from django.conf import settings
 import os
@@ -43,12 +42,30 @@ from rest_framework import serializers
 from django.http import FileResponse, Http404
 import httpx
 from asgiref.sync import sync_to_async
-import aiofiles
-from .requests import AsyncRequest
-from django.http import HttpRequest
-from rest_framework.request import Request
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.urls import reverse
+from django.utils.http import urlencode
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+from dj_rest_auth.registration.views import SocialLoginView
+from django.http import JsonResponse
+from allauth.socialaccount.models import SocialApp
+from allauth.socialaccount.providers.oauth2.client import OAuth2Error
+from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+from allauth.socialaccount.helpers import complete_social_login
+from rest_framework_simplejwt.tokens import RefreshToken
+from allauth.socialaccount.models import SocialLogin
+from django.db.models.functions import Lower
+from .constants import FRONTEND_BASE_URL
+
+
+class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
+    pass
+
+
+email_verification_token = EmailVerificationTokenGenerator()
+
 
 class CandidateViewSet(viewsets.ModelViewSet):
     queryset = Candidate.objects.all()
@@ -657,50 +674,99 @@ class SignUpView(APIView):
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_description="Register a new user and create a candidate profile.",
+        operation_description="Register a new user and create an empty candidate profile associated with it.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['username', 'password'],
+            required=['username', 'email', 'password', 'confirm_password'],
             properties={
                 'username': openapi.Schema(type=openapi.TYPE_STRING, description='Username for the new user'),
-                'password': openapi.Schema(type=openapi.TYPE_STRING, description='Password for the new user'),
                 'email': openapi.Schema(type=openapi.TYPE_STRING, description='Email address'),
-                'first_name': openapi.Schema(type=openapi.TYPE_STRING, description='First name'),
-                'last_name': openapi.Schema(type=openapi.TYPE_STRING, description='Last name'),
-                'phone': openapi.Schema(type=openapi.TYPE_STRING, description='Phone number'),
-                'age': openapi.Schema(type=openapi.TYPE_INTEGER, description='Age'),
-                'city': openapi.Schema(type=openapi.TYPE_STRING, description='City'),
+                'password': openapi.Schema(type=openapi.TYPE_STRING, description='Password for the new user'),
+                'confirm_password': openapi.Schema(type=openapi.TYPE_STRING, description='Confirm the password'),
             },
         ),
         responses={
             201: CandidateSerializer(),
-            400: openapi.Response(description='Bad Request')
+            400: openapi.Response(description='Bad Request - Invalid data'),
         }
     )
     def post(self, request):
         data = request.data
+
+        # Validate required fields
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        confirm_password = data.get('confirm_password')
+
+        if not username or not email or not password or not confirm_password:
+            return Response({'error': 'All fields (username, email, password, confirm_password) are required.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate email format
         try:
-            # Create User object
-            user = User.objects.create_user(
-                username=data['username'],
-                password=data['password'],
-                email=data.get('email', '')
-            )
+            validate_email(email)
+        except ValidationError:
+            return Response({'error': 'Invalid email format.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Create Candidate object linked to the User
-            candidate = Candidate.objects.create(
-                user=user,  # Associate the User with the Candidate
-                first_name=data.get('first_name', ''),
-                last_name=data.get('last_name', ''),
-                phone=data.get('phone', ''),
-                age=data.get('age', None),
-                city=data.get('city', '')
-            )
+        # Check if passwords match
+        if password != confirm_password:
+            return Response({'error': 'Passwords do not match.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Check if username or email is already taken
+        if User.objects.filter(username=username).exists():
+            return Response({'error': 'Username is already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(email=email).exists():
+            return Response({'error': 'An account with this email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create User and empty Candidate
+        try:
+            user = User.objects.create_user(username=username, password=password, email=email)
+
+            # Generate verification token
+            token = email_verification_token.make_token(user)
+
+            # Build the verification URL
+            verification_url = f"{FRONTEND_BASE_URL}{reverse('verify-email')}?{urlencode({'token': token, 'user_id': user.id})}"
+
+            # Send verification email
+            send_mail(
+                subject="Verify Your Account",
+                message=f"Click the link to verify your account: {verification_url}",
+                from_email=settings.EMAIL_HOST_USER,
+                recipient_list=[email],
+            )
+            candidate = get_object_or_404(Candidate, user=user)
+            
             serializer = CandidateSerializer(candidate)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Verify the user's email address using a token.",
+        manual_parameters=[
+            openapi.Parameter('token', openapi.IN_QUERY, type=openapi.TYPE_STRING, description="Verification token"),
+            openapi.Parameter('user_id', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="User ID"),
+        ],
+        responses={200: "Email verified successfully.", 400: "Invalid or expired token."}
+    )
+    def get(self, request):
+        token = request.query_params.get('token')
+        user_id = request.query_params.get('user_id')
+
+        user = get_object_or_404(User, id=user_id)
+
+        if email_verification_token.check_token(user, token):
+            user.profile.is_verified = True
+            user.profile.save()
+            return Response({"message": "Email verified successfully."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class LoginView(APIView):
@@ -742,20 +808,20 @@ class LoginView(APIView):
             is_email = False
 
         if is_email:
-            # Try to get user by email
             try:
                 user_obj = User.objects.get(email=identifier)
                 username = user_obj.username
             except User.DoesNotExist:
                 return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         else:
-            # If not an email, treat it as a username
             username = identifier
 
-        # Authenticate with either the username or the email-found username
         user = authenticate(username=username, password=password)
 
         if user is not None:
+            if not user.profile.is_verified:
+                return Response({'error': 'Account not verified. Please check your email.'}, status=status.HTTP_401_UNAUTHORIZED)
+
             refresh = RefreshToken.for_user(user)
             return Response({
                 'refresh': str(refresh),
@@ -797,6 +863,96 @@ class LogoutView(APIView):
             return Response({"detail": "Successfully logged out"}, status=status.HTTP_205_RESET_CONTENT)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Request a password reset link.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['email'],
+            properties={
+                'email': openapi.Schema(type=openapi.TYPE_STRING, description='Registered email address'),
+            },
+        ),
+        responses={200: "Password reset email sent", 404: "User not found"}
+    )
+    def post(self, request):
+        email = request.data.get('email')
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Generate password reset token
+        token = default_token_generator.make_token(user)
+        # reset_link = request.build_absolute_uri(
+        #     reverse('password-reset-confirm', args=[user.pk, token])
+        # )
+        reset_link = f"{FRONTEND_BASE_URL}{reverse('password-reset-confirm', args=[user.pk, token])}"
+
+        # Send password reset email
+        send_mail(
+            subject='Password Reset Request',
+            message=f'Click the link to reset your password: {reset_link}',
+            from_email=settings.EMAIL_HOST_USER,
+            recipient_list=[email],
+        )
+
+        return Response({'detail': 'Password reset email sent'}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Confirm password reset.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['password', 'confirm_password'],
+            properties={
+                'password': openapi.Schema(type=openapi.TYPE_STRING, description='New password'),
+                'confirm_password': openapi.Schema(type=openapi.TYPE_STRING, description='Confirm the new password'),
+            },
+        ),
+        responses={
+            200: "Password reset successful",
+            400: "Invalid token or mismatched passwords"
+        }
+    )
+    def post(self, request, user_id, token):
+        password = request.data.get('password')
+        confirm_password = request.data.get('confirm_password')
+
+        # Validate required fields
+        if not password or not confirm_password:
+            return Response(
+                {'error': 'Both password and confirm_password fields are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if passwords match
+        if password != confirm_password:
+            return Response(
+                {'error': 'Passwords do not match.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate the user and token
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Invalid user'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if default_token_generator.check_token(user, token):
+            user.set_password(password)
+            user.save()
+            return Response({'detail': 'Password reset successful'}, status=status.HTTP_200_OK)
+        else:
+            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserProfileView(APIView):
@@ -883,17 +1039,14 @@ class ChangePasswordView(APIView):
         operation_description="Change the authenticated user's password.",
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['old_password', 'new_password', 'confirm_password'],
+            required=['new_password', 'confirm_password'],
             properties={
                 'old_password': openapi.Schema(type=openapi.TYPE_STRING, description='Current password'),
                 'new_password': openapi.Schema(type=openapi.TYPE_STRING, description='New password'),
                 'confirm_password': openapi.Schema(type=openapi.TYPE_STRING, description='Confirm new password'),
             },
         ),
-        responses={
-            200: openapi.Response(description='Password updated successfully'),
-            400: openapi.Response(description='Bad Request'),
-        }
+        responses={200: "Password updated successfully", 400: "Bad Request"},
     )
     def post(self, request):
         user = request.user
@@ -901,7 +1054,11 @@ class ChangePasswordView(APIView):
         new_password = request.data.get('new_password')
         confirm_password = request.data.get('confirm_password')
 
-        if not user.check_password(old_password):
+        # Require old_password only if the user has one set
+        if user.has_usable_password() and not old_password:
+            return Response({"error": "Old password is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if old_password and not user.check_password(old_password):
             return Response({"error": "Old password is incorrect"}, status=status.HTTP_400_BAD_REQUEST)
 
         if new_password != confirm_password:
@@ -913,7 +1070,7 @@ class ChangePasswordView(APIView):
         # Update the password and maintain the session
         user.set_password(new_password)
         user.save()
-        update_session_auth_hash(request, user)  # Important to keep the user logged in after changing the password
+        update_session_auth_hash(request, user)  # Keep the user logged in
 
         return Response({"detail": "Password updated successfully"}, status=status.HTTP_200_OK)
 
@@ -3393,3 +3550,68 @@ class RecentSearchTermsView(APIView):
 
         # Serialize and return the terms
         return Response({'search_terms': [{'term': term.term, 'last_searched_at': term.last_searched_at} for term in terms]})
+
+
+class JobLocationsView(APIView):
+    """
+    Endpoint to return all distinct job locations.
+    """
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve all distinct job locations from the database.",
+        responses={
+            200: openapi.Response(
+                description="A list of distinct job locations",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_STRING)
+                )
+            )
+        }
+    )
+    def get(self, request):
+        # Perform case-insensitive distinct query on locations
+        distinct_locations = (
+            Job.objects.exclude(location__isnull=True)
+            .exclude(location__exact="")
+            .annotate(lower_location=Lower('location'))
+            .values_list('lower_location', flat=True)
+            .distinct()
+        )
+        return Response(list(distinct_locations), status=200)
+
+
+def custom_google_callback(request):
+    """
+    Custom callback to handle Google login and return JWT tokens.
+    """
+    adapter = GoogleOAuth2Adapter()
+    app = SocialApp.objects.get(provider=adapter.provider_id)
+    token = request.GET.get('code')  # Extract the authorization code from the query params
+    request_params = request.GET.dict()
+
+    if not token:
+        return JsonResponse({'error': 'Authorization code is required'}, status=400)
+
+    try:
+        # Exchange authorization code for an access token
+        token = adapter.get_access_token(app, token, request_params)
+        social_login = SocialLogin(token=token)
+        adapter.complete_login(request, social_login)
+
+        user = social_login.user
+        if not user.is_active:
+            return JsonResponse({'error': 'Account is inactive.'}, status=403)
+
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        return JsonResponse({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }, status=200)
+
+    except OAuth2Error as e:
+        return JsonResponse({'error': 'OAuth2 error: ' + str(e)}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': 'Unexpected error: ' + str(e)}, status=400)

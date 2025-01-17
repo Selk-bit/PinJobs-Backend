@@ -73,3 +73,5 @@ DEFAULT_TEMPLATE_DATA = {
     },
 }
 FRONTEND_PREVIEW_URL = "https://pinjobs-frontend.onrender.com/resume-preview/"
+FRONTEND_BASE_URL = "https://pinjobs-frontend.onrender.com"
+

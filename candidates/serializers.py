@@ -140,7 +140,7 @@ class AdSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Ad
-        fields = ["id", "title", "description", "original_url", "background", "is_ad"]
+        fields = ["id", "title", "description", "original_url", "background", "ad_type", "is_ad"]
 
     def get_is_ad(self, obj):
         return True
