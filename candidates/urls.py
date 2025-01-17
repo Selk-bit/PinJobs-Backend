@@ -5,7 +5,8 @@ from .views import (
     JobLinkCVView, TailoredCVView, ExistingJobCVView, UserTemplateView, GetJobScoresByIdsView,
     CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView, JobClickView,
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView,
-    RecentSearchTermsView
+    RecentSearchTermsView, PasswordResetRequestView, PasswordResetConfirmView, VerifyEmailView, custom_google_callback,
+    JobLocationsView
 )
 from django.contrib.auth import views as auth_views
 
@@ -13,8 +14,13 @@ urlpatterns = [
     path('auth/signup/', SignUpView.as_view(), name='signup'),
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/logout/', LogoutView.as_view(), name='logout'),
-    path('auth/password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),
-    path('auth/password_reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
+    # path('auth/password_reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),
+    # path('auth/password_reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
+    path('auth/password-reset/', PasswordResetRequestView.as_view(), name='password-reset-request'),
+    path('auth/password-reset-confirm/<int:user_id>/<str:token>/', PasswordResetConfirmView.as_view(),
+         name='password-reset-confirm'),
+    path('auth/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
+    path('auth/social/google/callback/', custom_google_callback, name='google_callback'),
 
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
     path('users/me/password/', ChangePasswordView.as_view(), name='change-password'),
@@ -52,5 +58,9 @@ urlpatterns = [
     path('credits/prices/', PackPricesView.as_view(), name='top-up-confirm'),
 
     path('searches/recent/', RecentSearchTermsView.as_view(), name='recent-search-terms'),
-]
 
+    path('accounts/', include('allauth.urls')),
+    path('accounts/', include('allauth.socialaccount.urls')),
+
+    path('locations/', JobLocationsView.as_view(), name='job-locations'),
+]

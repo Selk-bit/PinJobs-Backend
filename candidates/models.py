@@ -3,6 +3,11 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
 
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    is_verified = models.BooleanField(default=False)
+
+
 class Candidate(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)
     first_name = models.CharField(max_length=50)
@@ -219,16 +224,41 @@ class Job(models.Model):
 
 
 class Ad(models.Model):
+    AD_TYPE_CHOICES = [
+        ('in_top', 'In Top'),
+        ('in_jobs', 'In Jobs'),
+        ('in_loading', 'In Loading'),
+    ]
+
     title = models.CharField(max_length=255)
     description = models.TextField()
     original_url = models.URLField(max_length=5000)
     background = models.ImageField(upload_to="ads/backgrounds/", blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    ad_type = models.CharField(
+        max_length=20,
+        choices=AD_TYPE_CHOICES,
+        default='in_jobs'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Ad: {self.title}"
+
+    def clean(self):
+        """
+        Custom validation to enforce uniqueness for `in_top` and `in_loading` types.
+        """
+        if self.ad_type in ['in_top', 'in_loading']:
+            conflict = Ad.objects.filter(ad_type=self.ad_type, is_active=True).exclude(pk=self.pk)
+            if conflict.exists():
+                raise ValidationError(f"Only one active ad can have the type '{self.ad_type}'.")
+
+    def save(self, *args, **kwargs):
+        # Run custom validation before saving
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class JobSearch(models.Model):

@@ -55,7 +55,47 @@ INSTALLED_APPS = [
     'channels',
     'drf_yasg',
     'import_export',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
+    'rest_framework.authtoken'
 ]
+
+AUTHENTICATION_BACKENDS = (
+    'allauth.account.auth_backends.AuthenticationBackend',
+    'django.contrib.auth.backends.ModelBackend',
+)
+
+SITE_ID = 1
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'APP': {
+            'client_id': '18905452351-6qncpps9087vu0dpiejkt5lo4og2l7ma.apps.googleusercontent.com',
+            'secret': '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',
+            'key': ''
+        },
+        'SCOPE': [
+            'profile',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'access_type': 'online',
+        }
+    }
+}
+
+SOCIALACCOUNT_LOGIN_REDIRECT_URL = '/api/social/google/callback/'
+REST_SOCIAL_OAUTH_REDIRECT_URI = "/api/social/google/callback/"
+SOCIALACCOUNT_ADAPTER = 'candidates.adapter.CustomSocialAccountAdapter'
+LOGIN_REDIRECT_URL = '/dummy/'
+
+ACCOUNT_LOGOUT_ON_GET = False
+ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_USERNAME_REQUIRED = False
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -84,6 +124,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'allauth.account.middleware.AccountMiddleware'
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
@@ -212,7 +253,7 @@ EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'salim.elkellouti@etu.uae.ac.ma'
-EMAIL_HOST_PASSWORD = 'monsef2018'
+EMAIL_HOST_PASSWORD = 'ovwo bcnb uqxf vjck'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
