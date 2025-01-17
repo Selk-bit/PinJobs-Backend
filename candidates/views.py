@@ -58,6 +58,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from allauth.socialaccount.models import SocialLogin
 from django.db.models.functions import Lower
 from .constants import FRONTEND_BASE_URL
+from typing import Dict
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -310,7 +311,7 @@ class CandidateJobsView(APIView):
         # Fetch ads and paginate them
         ads_per_page = self.get_ads_per_page(len(paginated_jobs))  # Dynamically fetch ads per page
         current_page = int(request.query_params.get('page', 1)) - 1
-        ads = list(Ad.objects.filter(is_active=True).order_by("-created_at"))
+        ads = list(Ad.objects.filter(is_active=True, ad_type='in_jobs').order_by("-created_at"))
 
         if ads:
             ads_to_show = ads[current_page * ads_per_page:(current_page + 1) * ads_per_page]
@@ -442,7 +443,7 @@ class CandidateFavoriteJobsView(APIView):
         # Fetch ads and paginate them
         ads_per_page = self.get_ads_per_page(len(paginated_results))  # Dynamically fetch ads per page
         current_page = int(request.query_params.get('page', 1)) - 1
-        ads = list(Ad.objects.filter(is_active=True).order_by("-created_at"))
+        ads = list(Ad.objects.filter(is_active=True, ad_type='in_jobs').order_by("-created_at"))
 
         if ads:
             ads_to_show = ads[current_page * ads_per_page:(current_page + 1) * ads_per_page]
@@ -579,7 +580,7 @@ class CandidateAppliedJobsView(APIView):
         # Fetch ads and paginate them
         ads_per_page = self.get_ads_per_page(len(paginated_results))  # Dynamically fetch ads per page
         current_page = int(request.query_params.get('page', 1)) - 1
-        ads = list(Ad.objects.filter(is_active=True).order_by("-created_at"))
+        ads = list(Ad.objects.filter(is_active=True, ad_type='in_jobs').order_by("-created_at"))
 
         if ads:
             ads_to_show = ads[current_page * ads_per_page:(current_page + 1) * ads_per_page]
@@ -1572,6 +1573,9 @@ class UploadCVView(AsyncAPIView):
 
         if response.status_code == 200:
             extracted_data = response.json()
+            if isinstance(extracted_data[0], Dict) and "error" in extracted_data[0]:
+                return Response({'error': extracted_data[0]["error"]}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
             # Delete existing CV and CVData if they exist
             existing_cv = await sync_to_async(CV.objects.filter)(candidate=candidate, cv_type=CV.BASE)
             if await sync_to_async(existing_cv.exists)():
@@ -3615,3 +3619,49 @@ def custom_google_callback(request):
         return JsonResponse({'error': 'OAuth2 error: ' + str(e)}, status=400)
     except Exception as e:
         return JsonResponse({'error': 'Unexpected error: ' + str(e)}, status=400)
+
+
+class AdsByTypeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve ads by type (e.g., 'in_top', 'in_jobs', 'in_loading').",
+        manual_parameters=[
+            openapi.Parameter(
+                'ad_type',
+                openapi.IN_QUERY,
+                description="Type of ad to filter (e.g., 'in_top', 'in_jobs', 'in_loading').",
+                type=openapi.TYPE_STRING
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="List of ads",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT, properties={
+                        'id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Ad ID'),
+                        'title': openapi.Schema(type=openapi.TYPE_STRING, description='Ad title'),
+                        'description': openapi.Schema(type=openapi.TYPE_STRING, description='Ad description'),
+                        'original_url': openapi.Schema(type=openapi.TYPE_STRING, description='Ad URL'),
+                        'background': openapi.Schema(type=openapi.TYPE_STRING, description='Ad background image'),
+                        'ad_type': openapi.Schema(type=openapi.TYPE_STRING, description='Ad type'),
+                    })
+                )
+            ),
+            400: openapi.Response(description="Invalid request"),
+        }
+    )
+    def get(self, request):
+        ad_type = request.query_params.get('ad_type')
+
+        if not ad_type:
+            return Response({'error': 'ad_type query parameter is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if ad_type not in ['in_top', 'in_jobs', 'in_loading']:
+            return Response({'error': f'Invalid ad_type. Valid types are: in_top, in_jobs, in_loading.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        ads = Ad.objects.filter(is_active=True, ad_type=ad_type).order_by('-created_at')
+        serializer = AdSerializer(ads, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

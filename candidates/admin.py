@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Keyword, Location,
                      ScrapingSetting, Pack, Price, CreditAction, KeywordLocationCombination, Favorite, AbstractTemplate,
-                     Ad, GeneralSetting, SearchTerm)
+                     Ad, GeneralSetting, SearchTerm, UserProfile)
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
 from import_export import resources, fields
@@ -12,6 +12,11 @@ from import_export import widgets
 
 
 logger = logging.getLogger(__name__)
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'is_verified']
 
 
 @admin.register(AbstractTemplate)

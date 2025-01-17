@@ -6,7 +6,7 @@ from .views import (
     CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView, JobClickView,
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView,
     RecentSearchTermsView, PasswordResetRequestView, PasswordResetConfirmView, VerifyEmailView, custom_google_callback,
-    JobLocationsView
+    JobLocationsView, AdsByTypeView
 )
 from django.contrib.auth import views as auth_views
 
@@ -63,4 +63,7 @@ urlpatterns = [
     path('accounts/', include('allauth.socialaccount.urls')),
 
     path('locations/', JobLocationsView.as_view(), name='job-locations'),
+
+    path('ads/', AdsByTypeView.as_view(), name='ads-by-type'),
+
 ]
