@@ -3446,7 +3446,7 @@ class CVDetailView(APIView):
                 **template_data.get("templateData", {})
             }
         )
-
+        cv = CV.objects.filter(id=cv.id).first()
         cv.template = template
         cv.save()
 

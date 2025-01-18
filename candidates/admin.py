@@ -85,6 +85,7 @@ class CandidateAdmin(admin.ModelAdmin):
 
 @admin.register(CV)
 class CVAdmin(admin.ModelAdmin):
+    readonly_fields = ("generated_pdf", "thumbnail")
     list_display = ('id', 'candidate', 'cv_type', 'thumbnail', 'created_at', 'updated_at')
     search_fields = ('candidate__first_name', 'candidate__last_name')
 

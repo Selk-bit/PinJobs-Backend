@@ -1342,10 +1342,6 @@ def generate_cv_pdf(cv):
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_filename, ContentFile(thumbnail_io.getvalue()))
-        mycv = CV.objects.filter(id=cv.id).first()
-        print("==============================================")
-        print(mycv.thumbnail)
-        print(mycv.generated_pdf)
         # if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
         #     default_storage.delete(cv.generated_pdf.name)
         #
