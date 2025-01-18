@@ -152,9 +152,9 @@ def get_options():
     height = random.randint(500, 1000)
     chrome_options.add_argument(f"window-size={width},{height}")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
+    # chrome_options.add_argument("--headless")
+    # chrome_options.add_argument('--no-sandbox')
+    # chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -1342,15 +1342,15 @@ def generate_cv_pdf(cv):
         thumbnail_io = BytesIO()
         images[0].save(thumbnail_io, format="PNG")
         cv.thumbnail.save(thumbnail_filename, ContentFile(thumbnail_io.getvalue()))
-
+        mycv = CV.objects.filter(id=cv.id).first()
+        print("==============================================")
+        print(mycv.thumbnail)
+        print(mycv.generated_pdf)
         # if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
         #     default_storage.delete(cv.generated_pdf.name)
         #
         # if cv.thumbnail and default_storage.exists(cv.thumbnail.name):
         #     default_storage.delete(cv.thumbnail.name)
-
-
-
     finally:
         if driver:
             driver.quit()
