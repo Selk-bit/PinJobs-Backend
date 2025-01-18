@@ -160,8 +160,6 @@ def get_options():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_argument("disable-infobars")
     chrome_options.add_argument('log-level=3')
-    # chrome_options.binary_location = "/opt/render/chromium/chrome-linux/chrome"
-    # chrome_options.binary_location = "/opt/render/project/.render/chrome/opt/google/chrome/chrome"
     return chrome_options
 
 
@@ -1331,18 +1329,19 @@ def generate_cv_pdf(cv):
         characters = string.ascii_letters + string.digits
         random_string = "".join(random.choice(characters) for _ in range(5))
 
-        # cv.generated_pdf.delete(save=False)  # Remove any in-memory reference
-        # cv.thumbnail.delete(save=False)  # Remove any in-memory reference
+        cv.generated_pdf.delete(save=False)  # Remove any in-memory reference
+        cv.thumbnail.delete(save=False)  # Remove any in-memory reference
 
         # Save the new PDF to Django's storage
-        pdf_filename = f"cv_{cv.id}.pdf"
-        pdf_path = pdf_filename
-        cv.generated_pdf.save(pdf_path, ContentFile(pdf_data), save=False)
+        pdf_filename = f"cv_{cv.id}_{random_string}.pdf"
+        cv.generated_pdf.save(pdf_filename, ContentFile(pdf_data))
 
         # Generate thumbnail directly from the PDF data (using `convert_from_bytes`)
         images = convert_from_bytes(pdf_data, first_page=1, last_page=1)
-        thumbnail_filename = f"thumbnail_{cv.id}.png"
-        thumbnail_path = thumbnail_filename
+        thumbnail_filename = f"thumbnail_{cv.id}_{random_string}.png"
+        thumbnail_io = BytesIO()
+        images[0].save(thumbnail_io, format="PNG")
+        cv.thumbnail.save(thumbnail_filename, ContentFile(thumbnail_io.getvalue()))
 
         # if cv.generated_pdf and default_storage.exists(cv.generated_pdf.name):
         #     default_storage.delete(cv.generated_pdf.name)
@@ -1350,18 +1349,7 @@ def generate_cv_pdf(cv):
         # if cv.thumbnail and default_storage.exists(cv.thumbnail.name):
         #     default_storage.delete(cv.thumbnail.name)
 
-        # Save the thumbnail to Django's storage
-        thumbnail_io = BytesIO()
-        images[0].save(thumbnail_io, format="PNG")
-        cv.thumbnail.save(thumbnail_path, ContentFile(thumbnail_io.getvalue()), save=False)
-        cv.generated_pdf.name = pdf_filename
-        cv.thumbnail.name = thumbnail_filename
-        # Save the CV instance after all updates
-        cv.save()
-        CV.objects.filter(id=cv.id).update(
-            generated_pdf=pdf_filename,
-            thumbnail=thumbnail_filename
-        )
+
 
     finally:
         if driver:

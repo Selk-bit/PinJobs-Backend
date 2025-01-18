@@ -3290,7 +3290,7 @@ class CVDetailView(APIView):
         cv.save(update_fields=["name"])
 
         # Update CVData
-        self.update_cv_data(cv, request.data["cv_data"], partial=True, fire_signal=True)
+        self.update_cv_data(cv, request.data["cv_data"], partial=True, fire_signal=False)
 
         # Update Template
         self.update_template(cv, request.data["template"], partial=False)
