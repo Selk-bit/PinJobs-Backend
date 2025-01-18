@@ -107,7 +107,6 @@ def update_cv_name_after_cvdata_save(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=CVData)
-@receiver(post_save, sender=Template)
 def handle_cv_update(sender, instance, **kwargs):
     """
     Signal triggered when CVData or Template is created/updated.

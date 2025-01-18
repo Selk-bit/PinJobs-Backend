@@ -17,7 +17,7 @@ from django.db.models.signals import post_save
 from django.conf import settings
 import os
 from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
-                    construct_similarity_prompt)
+                    construct_similarity_prompt, generate_cv_pdf)
 import json
 from .tasks import run_scraping_task
 from django.contrib.auth import authenticate
@@ -3447,9 +3447,9 @@ class CVDetailView(APIView):
             }
         )
 
-        cv = CV.objects.filter(id=cv.id).first()
         cv.template = template
         cv.save()
+        generate_cv_pdf(cv)
 
     @swagger_auto_schema(
         operation_description="Delete a CV by ID, including its associated template if present.",
