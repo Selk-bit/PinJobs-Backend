@@ -740,7 +740,7 @@ class SignUpView(APIView):
             token = email_verification_token.make_token(user)
 
             # Build the verification URL
-            verification_url = f"{FRONTEND_BASE_URL}{reverse('verify-email')}?{urlencode({'token': token, 'user_id': user.id})}"
+            verification_url = f"{FRONTEND_BASE_URL}/verify-email?{urlencode({'token': token, 'user_id': user.id})}"
 
             # Send verification email
             send_mail(
@@ -905,7 +905,8 @@ class PasswordResetRequestView(APIView):
         # reset_link = request.build_absolute_uri(
         #     reverse('password-reset-confirm', args=[user.pk, token])
         # )
-        reset_link = f"{FRONTEND_BASE_URL}{reverse('password-reset-confirm', args=[user.pk, token])}"
+        # reset_link = f"{FRONTEND_BASE_URL}{reverse('password-reset-confirm', args=[user.pk, token])}"
+        verification_url = f"{FRONTEND_BASE_URL}/password-reset-confirm/{user.pk}/{token}/"
 
         # Send password reset email
         send_mail(
