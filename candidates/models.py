@@ -262,8 +262,8 @@ class Ad(models.Model):
 
 
 class JobSearch(models.Model):
-    candidate = models.ForeignKey('Candidate', on_delete=models.CASCADE)
-    job = models.ForeignKey(Job, on_delete=models.CASCADE)
+    cv = models.ForeignKey('CV', on_delete=models.CASCADE, related_name='job_searches')
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name='job_searches')
     similarity_score = models.FloatField()
     search_date = models.DateTimeField(auto_now_add=True)
     is_applied = models.BooleanField(default=False)
@@ -271,7 +271,7 @@ class JobSearch(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Job search for {self.candidate} - {self.job.title}"
+        return f"Job search for {self.cv} - {self.job.title}"
 
 
 class JobClick(models.Model):

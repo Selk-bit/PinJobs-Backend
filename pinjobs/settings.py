@@ -156,17 +156,17 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.mysql',
-#         'OPTIONS': {'charset': 'utf8mb4'},
-#         'NAME': 'pinjobs',  # Replace with your database name
-#         'USER': 'root',  # Replace with your database username
-#         'PASSWORD': '',  # Replace with your database password
-#         'HOST': 'localhost',  # Replace if your MySQL server is hosted elsewhere
-#         'PORT': '3306',  # Default MySQL port
-#     }
-# }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'OPTIONS': {'charset': 'utf8mb4'},
+        'NAME': 'pinjobs',  # Replace with your database name
+        'USER': 'root',  # Replace with your database username
+        'PASSWORD': '',  # Replace with your database password
+        'HOST': 'localhost',  # Replace if your MySQL server is hosted elsewhere
+        'PORT': '3306',  # Default MySQL port
+    }
+}
 
 # DATABASES = {
 #     'default': {
@@ -180,17 +180,17 @@ WSGI_APPLICATION = 'pinjobs.wsgi.application'
 #     }
 # }
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'pinjobs_db',  # Replace with your PostgreSQL database name
-        'USER': 'pinjobs_db_user',    # Replace with your PostgreSQL username
-        'PASSWORD': 'CZ48By3MvLqZOXkytL4iFE8pYX3y9SLL', # Replace with your PostgreSQL password
-        'HOST': 'dpg-ctdko2qlqhvc73d6r57g-a', # Replace with your PostgreSQL host
-        'PORT': '5432',      # Default PostgreSQL port
-    }
-}
-os.environ["PATH"] += os.pathsep + os.path.join(os.getenv("HOME"), "bin")
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'pinjobs_db',  # Replace with your PostgreSQL database name
+#         'USER': 'pinjobs_db_user',    # Replace with your PostgreSQL username
+#         'PASSWORD': 'CZ48By3MvLqZOXkytL4iFE8pYX3y9SLL', # Replace with your PostgreSQL password
+#         'HOST': 'dpg-ctdko2qlqhvc73d6r57g-a', # Replace with your PostgreSQL host
+#         'PORT': '5432',      # Default PostgreSQL port
+#     }
+# }
+# os.environ["PATH"] += os.pathsep + os.path.join(os.getenv("HOME"), "bin")
 
 
 # Password validation

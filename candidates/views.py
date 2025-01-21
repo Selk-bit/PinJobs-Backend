@@ -67,80 +67,6 @@ class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
 
 email_verification_token = EmailVerificationTokenGenerator()
 
-
-class CandidateViewSet(viewsets.ModelViewSet):
-    queryset = Candidate.objects.all()
-    serializer_class = CandidateSerializer
-
-
-class CVViewSet(viewsets.ModelViewSet):
-    queryset = CV.objects.all()
-    serializer_class = CVSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        # Ensure only the authenticated user can access their CV
-        user = self.request.user
-        return CV.objects.filter(candidate__user=user)
-
-
-class CVDataViewSet(viewsets.ModelViewSet):
-    queryset = CVData.objects.all()
-    serializer_class = CVDataSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        # Ensure only the authenticated user can access their CV data
-        user = self.request.user
-        return CVData.objects.filter(cv__candidate__user=user)
-
-
-class JobViewSet(viewsets.ModelViewSet):
-    queryset = Job.objects.all()
-    serializer_class = JobSerializer
-    permission_classes = [IsAuthenticated]
-
-    @action(detail=False, methods=['get'])
-    def filter_jobs(self, request):
-        candidate_id = request.query_params.get('candidate_id')
-        job_type = request.query_params.get('job_type')
-        employment_type = request.query_params.get('employment_type')
-        location = request.query_params.get('location')
-
-        # Filter jobs based on the provided parameters
-        queryset = Job.objects.all()
-        if candidate_id:
-            candidate = Candidate.objects.get(id=candidate_id)
-            # Additional logic to filter based on candidate's profile can be added here
-        if job_type:
-            queryset = queryset.filter(job_type=job_type)
-        if employment_type:
-            queryset = queryset.filter(employment_type=employment_type)
-        if location:
-            queryset = queryset.filter(location__icontains=location)
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['get'])
-    def candidate_jobs(self, request, pk=None):
-        candidate = Candidate.objects.get(pk=pk)
-        job_searches = JobSearch.objects.filter(candidate=candidate)
-        serializer = JobSearchSerializer(job_searches, many=True)
-        return Response(serializer.data)
-
-
-class JobSearchViewSet(viewsets.ModelViewSet):
-    queryset = JobSearch.objects.all()
-    serializer_class = JobSearchSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        # Ensure only the authenticated user can access their job searches
-        user = self.request.user
-        return JobSearch.objects.filter(candidate__user=user)
-
-
 class JobFilter(django_filters.FilterSet):
     description = django_filters.CharFilter(field_name="description", lookup_expr='icontains')
     company_name = django_filters.CharFilter(field_name="company_name", lookup_expr='icontains')
@@ -309,7 +235,7 @@ class CandidateJobsView(APIView):
             jobs = jobs.annotate(
                 similarity_score=Subquery(
                     JobSearch.objects.filter(
-                        candidate=candidate,
+                        cv__candidate=candidate,
                         job_id=OuterRef('id')
                     ).values('similarity_score')[:1]
                 )
@@ -334,8 +260,18 @@ class CandidateJobsView(APIView):
             ads_to_show = []
 
         job_ids = [job.id for job in paginated_jobs]
-        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
-        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        job_searches = JobSearch.objects.filter(job_id__in=job_ids, cv__candidate=candidate)
+        similarity_scores_map = {}
+        for js in job_searches:
+            job_id = js.job_id
+            if job_id not in similarity_scores_map:
+                similarity_scores_map[job_id] = []
+            similarity_scores_map[job_id].append({
+                'cv_id': js.cv.id,
+                'type': js.cv.cv_type,
+                'score': js.similarity_score
+            })
+
         applies_map = {js.job_id: js.is_applied for js in job_searches}
 
         favorites = Favorite.objects.filter(candidate=candidate, job_id__in=job_ids)
@@ -374,7 +310,17 @@ class JobDetailView(APIView):
             job_ids = [job.id]
 
             job_searches = JobSearch.objects.filter(job_id__in=job_ids)
-            similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+            similarity_scores_map = {}
+            for js in job_searches:
+                job_id = js.job_id
+                if job_id not in similarity_scores_map:
+                    similarity_scores_map[job_id] = []
+                similarity_scores_map[job_id].append({
+                    'cv_id': js.cv.id,
+                    'type': js.cv.cv_type,
+                    'score': js.similarity_score
+                })
+
             applies_map = {js.job_id: js.is_applied for js in job_searches}
 
             favorites = Favorite.objects.filter(job_id__in=job_ids)
@@ -468,8 +414,18 @@ class CandidateFavoriteJobsView(APIView):
         job_ids = [job.id for job in paginated_results]
 
         # Get all JobSearches for the candidate
-        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
-        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        job_searches = JobSearch.objects.filter(job_id__in=job_ids, cv__candidate=candidate)
+        similarity_scores_map = {}
+        for js in job_searches:
+            job_id = js.job_id
+            if job_id not in similarity_scores_map:
+                similarity_scores_map[job_id] = []
+            similarity_scores_map[job_id].append({
+                'cv_id': js.cv.id,
+                'type': js.cv.cv_type,
+                'score': js.similarity_score
+            })
+
         applies_map = {js.job_id: js.is_applied for js in job_searches}
 
         favorites = Favorite.objects.filter(job_id__in=job_ids)
@@ -582,7 +538,7 @@ class CandidateAppliedJobsView(APIView):
         candidate = request.user.candidate
 
         # Get applied jobs for the candidate
-        applied_job_searches = JobSearch.objects.filter(candidate=candidate, is_applied=True).select_related('job')
+        applied_job_searches = JobSearch.objects.filter(cv__candidate=candidate, is_applied=True).select_related('job')
         applied_jobs = [js.job for js in applied_job_searches]
 
         # Apply pagination
@@ -605,8 +561,17 @@ class CandidateAppliedJobsView(APIView):
         job_ids = [job.id for job in paginated_results]
 
         # Get similarity scores for the candidate
-        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
-        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        job_searches = JobSearch.objects.filter(job_id__in=job_ids, cv__candidate=candidate)
+        similarity_scores_map = {}
+        for js in job_searches:
+            job_id = js.job_id
+            if job_id not in similarity_scores_map:
+                similarity_scores_map[job_id] = []
+            similarity_scores_map[job_id].append({
+                'cv_id': js.cv.id,
+                'type': js.cv.cv_type,
+                'score': js.similarity_score
+            })
         applies_map = {js.job_id: js.is_applied for js in job_searches}
 
         favorites = Favorite.objects.filter(job_id__in=job_ids)
@@ -650,7 +615,7 @@ class CandidateAppliedJobsView(APIView):
         job_id = request.data.get('job_id')
         candidate = request.user.candidate
         job = get_object_or_404(Job, id=job_id)
-        job_search = JobSearch.objects.filter(candidate=candidate, job=job).first()
+        job_search = JobSearch.objects.filter(cv__candidate=candidate, job=job).first()
 
         if not job_search or job_search.similarity_score is None:
             return Response({'error': 'Similarity score is not available for this job. get the score at least before marking it as applied.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1889,7 +1854,7 @@ class JobLinkCVView(APIView):
 
         # Create the JobSearch with the similarity score
         JobSearch.objects.get_or_create(
-            candidate=candidate,
+            cv__candidate=candidate,
             job=job,
             defaults={"similarity_score": score}
         )
@@ -1977,7 +1942,7 @@ class ExistingJobCVView(APIView):
         base_cv_data = base_cv.cv_data
 
         # Check if JobSearch exists for this candidate and job
-        job_search = JobSearch.objects.filter(candidate=candidate, job=job).first()
+        job_search = JobSearch.objects.filter(cv=base_cv, job=job).first()
         if job_search:
             score = job_search.similarity_score
         else:
@@ -1992,7 +1957,7 @@ class ExistingJobCVView(APIView):
                 return Response({'error': f"Failed to fetch score from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             # Save the JobSearch with the calculated score
-            JobSearch.objects.create(candidate=candidate, job=job, similarity_score=score)
+            JobSearch.objects.create(cv=base_cv, job=job, similarity_score=score)
 
         # If the score is less than 50, return a "not recommended" response
         if score < 50:
@@ -2789,8 +2754,17 @@ class CandidateCVsView(ListAPIView):
         job_ids = list(queryset.exclude(job__isnull=True).values_list("job__id", flat=True))
 
         # Get similarity scores for related jobs
-        job_searches = JobSearch.objects.filter(candidate=candidate, job_id__in=job_ids)
-        similarity_scores_map = {js.job_id: js.similarity_score for js in job_searches}
+        job_searches = JobSearch.objects.filter(job_id__in=job_ids, cv__candidate=candidate)
+        similarity_scores_map = {}
+        for js in job_searches:
+            job_id = js.job_id
+            if job_id not in similarity_scores_map:
+                similarity_scores_map[job_id] = []
+            similarity_scores_map[job_id].append({
+                'cv_id': js.cv.id,
+                'type': js.cv.cv_type,
+                'score': js.similarity_score
+            })
 
         # Combine base CV with the filtered queryset
         if base_cv:
@@ -2867,7 +2841,7 @@ class GetFavoriteScoresView(APIView):
 
         # Exclude jobs that already have JobSearch
         favorite_jobs = Favorite.objects.filter(candidate=candidate)
-        job_ids_with_search = JobSearch.objects.filter(candidate=candidate).values_list('job_id', flat=True)
+        job_ids_with_search = JobSearch.objects.filter(cv__candidate=candidate).values_list('job_id', flat=True)
         jobs_to_compare = favorite_jobs.exclude(job_id__in=job_ids_with_search)
 
         if not jobs_to_compare.exists():
@@ -2896,7 +2870,7 @@ class GetFavoriteScoresView(APIView):
                 score = score_data['score']
 
                 job = Job.objects.get(id=job_id)
-                JobSearch.objects.create(candidate=candidate, job=job, similarity_score=score)
+                JobSearch.objects.create(cv=base_cv, job=job, similarity_score=score)
 
             return Response({"detail": "Job searches created successfully.", "scores": scores}, status=status.HTTP_200_OK)
         except Exception as e:
@@ -2984,13 +2958,100 @@ class GetJobScoresByIdsView(APIView):
 
                 job = Job.objects.get(id=job_id)
                 JobSearch.objects.update_or_create(
-                    candidate=candidate,
+                    cv=base_cv,
                     job=job,
                     defaults={"similarity_score": score}
                 )
 
             return Response(
                 {"detail": "Similarity scores retrieved successfully.", "scores": scores},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class GenerateJobCVScoreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Generate similarity score between a specific job and CV.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'job_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Job ID'),
+                'cv_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='CV ID'),
+            },
+            required=['job_id', 'cv_id']
+        ),
+        responses={
+            200: openapi.Response(
+                description="Similarity score generated successfully.",
+                examples={
+                    "application/json": {
+                        "detail": "Similarity score generated successfully.",
+                        "job_id": 1,
+                        "cv_id": 42,
+                        "score": 0.89
+                    }
+                }
+            ),
+            400: openapi.Response(description="Bad Request - Invalid input or missing data."),
+            500: openapi.Response(description="Internal server error.")
+        }
+    )
+    def post(self, request):
+        job_id = request.data.get("job_id")
+        cv_id = request.data.get("cv_id")
+
+        if not job_id or not cv_id:
+            return Response(
+                {"error": "Both job_id and cv_id are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            job = Job.objects.get(id=job_id)
+            cv = CV.objects.get(id=cv_id, candidate=request.user.candidate)
+        except Job.DoesNotExist:
+            return Response({"error": "Job not found."}, status=status.HTTP_400_BAD_REQUEST)
+        except CV.DoesNotExist:
+            return Response({"error": "CV not found or does not belong to the user."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not hasattr(cv, 'cv_data'):
+            return Response({"error": "CVData is missing for the specified CV."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate similarity score
+        candidate_profile = construct_candidate_profile(cv.cv_data)
+        job_data = {
+            "id": job.id,
+            "title": job.title,
+            "description": job.description,
+            "requirements": ', '.join(job.requirements or []),
+            "skills": ', '.join(job.skills_required or [])
+        }
+        prompt = construct_similarity_prompt(candidate_profile, [job_data])
+
+        try:
+            gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            score_data = json.loads(gemini_response)[0]
+            score = score_data.get("score")
+
+            # Update or create JobSearch instance
+            JobSearch.objects.update_or_create(
+                job=job,
+                cv=cv,
+                defaults={"similarity_score": score}
+            )
+
+            return Response(
+                {
+                    "detail": "Similarity score generated successfully.",
+                    "job_id": job_id,
+                    "cv_id": cv_id,
+                    "score": score
+                },
                 status=status.HTTP_200_OK
             )
         except Exception as e:

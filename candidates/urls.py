@@ -6,7 +6,7 @@ from .views import (
     CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView, JobClickView,
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView,
     RecentSearchTermsView, PasswordResetRequestView, PasswordResetConfirmView, VerifyEmailView, custom_google_callback,
-    JobLocationsView, AdsByTypeView
+    JobLocationsView, AdsByTypeView, GenerateJobCVScoreView
 )
 from django.contrib.auth import views as auth_views
 
@@ -49,6 +49,7 @@ urlpatterns = [
     path('jobs/favorites/scores/', GetFavoriteScoresView.as_view(), name='favorite_scores'),
     path('jobs/applied/', CandidateAppliedJobsView.as_view(), name='candidate-applied-jobs'),
     path('jobs/scores/', GetJobScoresByIdsView.as_view(), name='job_scores_by_ids'),
+    path('jobs/score/cv/', GenerateJobCVScoreView.as_view(), name='job_score_by_cv_id'),
     path('jobs/clicks/<int:job_id>/', JobClickView.as_view(), name='job-click'),
 
     path('templates/', AbstractTemplateListView.as_view(), name='abstract-template-list'),

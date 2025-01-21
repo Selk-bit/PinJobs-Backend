@@ -1293,9 +1293,10 @@ def generate_cv_pdf(cv):
         driver.get("chrome://settings/clearBrowserData")  # Open Chrome's clear cache settings
         driver.execute_script("window.localStorage.clear();")  # Clear local storage
         driver.execute_script("window.sessionStorage.clear();")  # Clear session storage
-        driver.get(url)  # Reload the CV page
         driver.execute_cdp_cmd("Network.clearBrowserCache", {})  # Clear browser cache using DevTools Protocol
         driver.execute_cdp_cmd("Network.clearBrowserCookies", {})  # Clear cookies for safety
+
+        driver.get(url)
 
         # Wait for the container to appear
         try:

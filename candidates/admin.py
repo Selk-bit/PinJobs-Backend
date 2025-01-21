@@ -229,8 +229,8 @@ class AdAdmin(admin.ModelAdmin):
 
 @admin.register(JobSearch)
 class JobSearchAdmin(admin.ModelAdmin):
-    list_display = ('job', 'candidate', 'similarity_score', 'search_date')
-    search_fields = ('candidate__first_name', 'job__title')
+    list_display = ('job', 'cv', 'similarity_score', 'search_date')
+    search_fields = ('cv__name', 'job__title')
 
 
 @admin.register(CreditPurchase)
