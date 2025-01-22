@@ -3529,6 +3529,9 @@ class CVDetailView(APIView):
             if cv.template:
                 cv.template.delete()
 
+            # Delete associated JobSearch entries
+            JobSearch.objects.filter(cv=cv).delete()
+
             # Delete the CV
             cv.delete()
 

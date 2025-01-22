@@ -1,10 +1,11 @@
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from .models import (Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate, CVData, UserProfile,
-                     Candidate)
+                     Candidate, JobSearch)
 from django.contrib.auth.models import User
 from .constants import DEFAULT_TEMPLATE_DATA
-from .utils import generate_cv_pdf
+from .utils import generate_cv_pdf, construct_only_score_job_prompt, get_gemini_response
+import json
 
 
 @receiver(post_save, sender=Keyword)
@@ -140,3 +141,45 @@ def create_user_profile(sender, instance, created, **kwargs):
 def create_candidate(sender, instance, created, **kwargs):
     if created:
         Candidate.objects.get_or_create(user=instance)
+
+
+@receiver(post_save, sender=CVData)
+def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
+    """
+    Signal to generate a similarity score for a tailored CV after it is created.
+    """
+    # Only act on creation and for tailored CVs
+    if not created or instance.cv.cv_type != instance.cv.TAILORED:
+        return
+
+    try:
+        job = instance.cv.job  # Associated job for the tailored CV
+        if not job:
+            return  # No job associated; nothing to score
+
+        candidate = instance.cv.candidate
+        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+
+        if not base_cv or not hasattr(base_cv, 'cv_data'):
+            return  # Base CV or its data is missing; cannot proceed
+
+        # Construct the prompt for Gemini
+        tailored_cv_data = instance
+        prompt = construct_only_score_job_prompt(tailored_cv_data, job.description)
+
+        # Fetch the similarity score from Gemini
+        gemini_response = get_gemini_response(prompt)
+        gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+        score_data = json.loads(gemini_response)
+        score = score_data.get("score", 0)
+
+        # Create the JobSearch instance
+        JobSearch.objects.update_or_create(
+            cv=instance.cv,
+            job=job,
+            defaults={"similarity_score": score}
+        )
+
+    except Exception as e:
+        # Log the error
+        print(f"Failed to generate similarity score for tailored CV: {e}")
